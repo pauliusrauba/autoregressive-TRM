@@ -2,3 +2,4 @@ checkpoints/
 wandb/
 lightning_logs/
 models/__pycache__/
+data/
