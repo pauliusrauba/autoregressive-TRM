@@ -5,9 +5,11 @@ import argparse
 import torch
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import WandbLogger
 
 from models import build_model
-from datasets import load_dataset
+from data_modules import load_dataset
+
 
 
 def parse_args():
@@ -15,6 +17,12 @@ def parse_args():
     parser.add_argument("--model", type=str, default="gpt")
     parser.add_argument("--dataset", type=str, default="shakespeare_char")
     parser.add_argument("--data-dir", type=str, default="data")
+    parser.add_argument(
+        "--run-name",
+        type=str,
+        default=None,
+        help="Optional W&B run name (defaults to '<model>-<dataset>')",
+    )
 
     # Model hyperparameters
     parser.add_argument("--block-size", type=int, default=256)
@@ -65,6 +73,13 @@ def main():
     print(f"Model: {args.model}, Dataset: {args.dataset}")
     print(f"Parameters: {total_params:.2f}M")
 
+    # Weights & Biases logger
+    wandb_logger = WandbLogger(
+        project="icml-recursive-llms",
+        name=args.run_name or f"{args.model}-{args.dataset}",
+        config=vars(args),
+    )
+
     # 3) Checkpointing
     ckpt_dir = os.path.join("checkpoints", f"{args.dataset}_{args.model}")
     os.makedirs(ckpt_dir, exist_ok=True)
@@ -86,6 +101,7 @@ def main():
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
         devices=1,
         enable_progress_bar=True,
+        logger=wandb_logger,
         callbacks=[checkpoint_cb],
     )
 
