@@ -10,8 +10,6 @@ from pytorch_lightning.loggers import WandbLogger
 from models import build_model
 from data_modules import load_dataset
 
-
-
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="gpt")
@@ -32,14 +30,46 @@ def parse_args():
     parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--lr", type=float, default=3e-4)
 
+    # Unified GPT/UT levels (only used if args.model == "unified_gpt_ut")
+    parser.add_argument(
+        "--level",
+        type=int,
+        default=0,
+        help="Unified GPT/UT level: 0=GPT, 1=recurrent, 2=+learned step, 3=+sinusoidal 2D, 4=UT step, 5=+ACT, 6=+ponder",
+    )
+    parser.add_argument(
+        "--num-steps",
+        type=int,
+        default=None,
+        help="Number of recurrent refinement steps for levels 1-4. Defaults to n_layer if omitted.",
+    )
+    parser.add_argument(
+        "--ut-max-steps",
+        type=int,
+        default=16,
+        help="Max steps for learned step embeddings (level 2) and ACT loop (levels 5-6).",
+    )
+    parser.add_argument(
+        "--act-threshold",
+        type=float,
+        default=0.99,
+        help="ACT halting threshold (levels 5-6).",
+    )
+    parser.add_argument(
+        "--act-loss-weight",
+        type=float,
+        default=0.01,
+        help="Ponder cost coefficient (level 6).",
+    )
+
     # Training hyperparameters
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--max-steps", type=int, default=6500)
     parser.add_argument("--eval-interval", type=int, default=500)
     parser.add_argument("--eval-iters", type=int, default=200)
     parser.add_argument("--seed", type=int, default=1337)
-    
-    # train.py parse_args()
+
+    # Algorithmic dataset args
     parser.add_argument("--algo-train-len", type=int, default=40)
     parser.add_argument("--algo-val-len", type=int, default=40)
     parser.add_argument("--algo-train-examples", type=int, default=50000)
@@ -68,8 +98,7 @@ def main():
     )
 
     # 2) Model
-    model = build_model(
-        args.model,
+    model_kwargs = dict(
         vocab_size=vocab_size,
         block_size=args.block_size,
         n_embd=args.n_embd,
@@ -79,6 +108,20 @@ def main():
         lr=args.lr,
     )
 
+    # Only pass level/UT/ACT args to the unified model so existing "gpt" runs stay untouched.
+    if args.model in ("ut_gpt"):
+        model_kwargs.update(
+            dict(
+                level=args.level,
+                num_steps=args.num_steps,        # None is fine; model defaults to n_layer
+                max_steps=args.ut_max_steps,     # maps to model's max_steps
+                act_threshold=args.act_threshold,
+                act_loss_weight=args.act_loss_weight,
+            )
+        )
+
+    model = build_model(args.model, **model_kwargs)
+
     total_params = sum(p.numel() for p in model.parameters()) / 1e6
     print(f"Model: {args.model}, Dataset: {args.dataset}")
     print(f"Parameters: {total_params:.2f}M")
@@ -86,7 +129,9 @@ def main():
     # Weights & Biases logger
     wandb_logger = WandbLogger(
         project="icml-recursive-llms",
-        name=args.run_name or f"{args.model}-{args.dataset}",
+        name=args.run_name or f"{args.model}-lvl{args.level}-{args.dataset}"
+        if args.model in ("ut_gpt")
+        else (args.run_name or f"{args.model}-{args.dataset}"),
         config=vars(args),
     )
 
