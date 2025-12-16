@@ -7,7 +7,7 @@ from typing import Dict, List, Tuple
 import torch
 import pytorch_lightning as pl
 
-from datasets.algorithmic_char import _build_tokenizer, _make_example
+from data_modules.algorithmic_char import _build_tokenizer, _make_example
 
 
 @torch.no_grad()
@@ -113,7 +113,7 @@ class AlgorithmicEvalCallback(pl.Callback):
                 seed=self.seed,
                 device=device,
             )
-            prefix = f"algo/{spec.task}/L{spec.length}"
+            prefix = f"TaskEvaluation/{spec.task}/L{spec.length}"
             metrics[f"{prefix}/char_acc"] = char_acc
             metrics[f"{prefix}/seq_acc"] = seq_acc
 

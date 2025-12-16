@@ -6,6 +6,7 @@ import torch
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
+from callbacks.algorithmic_eval import AlgorithmicEvalCallback, AlgoEvalSpec
 
 from models import build_model
 from data_modules import load_dataset
@@ -14,7 +15,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="gpt")
     parser.add_argument("--dataset", type=str, default="shakespeare_char")
-    parser.add_argument("--data-dir", type=str, default="data")
+    parser.add_argument("--data-dir", type=str, default="/mnt/pdata/pr501/icml2025")
     parser.add_argument(
         "--run-name",
         type=str,
@@ -109,7 +110,7 @@ def main():
     )
 
     # Only pass level/UT/ACT args to the unified model so existing "gpt" runs stay untouched.
-    if args.model in ("ut_gpt"):
+    if args.model == "ut_gpt":
         model_kwargs.update(
             dict(
                 level=args.level,
@@ -148,6 +149,26 @@ def main():
         save_last=True,
     )
 
+    # Get callbacks
+    callbacks = [checkpoint_cb]
+    if args.dataset in ("copy_char", "reverse_char", "addition_char"):
+        # Determine task name from dataset
+        task_map = {
+            "copy_char": "copy",
+            "reverse_char": "reverse", 
+            "addition_char": "addition"
+        }
+        task = task_map[args.dataset]
+        
+        # Evaluate at training length (in-distribution) and longer (extrapolation)
+        algo_specs = [
+            AlgoEvalSpec(task=task, length=args.algo_train_len, n=100),  # in-distribution
+            AlgoEvalSpec(task=task, length=400, n=100),  # extrapolation (like eval_algorithmic.py)
+        ]
+        algo_callback = AlgorithmicEvalCallback(specs=algo_specs, seed=args.seed)
+        callbacks.append(algo_callback)
+
+
     # 4) Trainer
     trainer = pl.Trainer(
         max_steps=args.max_steps,
@@ -157,7 +178,7 @@ def main():
         devices=1,
         enable_progress_bar=True,
         logger=wandb_logger,
-        callbacks=[checkpoint_cb],
+        callbacks=callbacks,
     )
 
     # 5) Train
