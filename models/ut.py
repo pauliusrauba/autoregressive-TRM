@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from models.trainer import BaseLitGPT
-from models.layers import Block
+from models.common.trainer import BaseLitGPT
+from models.common.layers import Block
+
 
 class UT(BaseLitGPT):
     def __init__(

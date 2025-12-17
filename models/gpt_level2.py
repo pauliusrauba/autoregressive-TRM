@@ -2,8 +2,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from models.trainer import BaseLitGPT
-from models.layers import Block
+from models.common.trainer import BaseLitGPT
+from models.common.layers import Block
+
 
 class GPTLevel2(BaseLitGPT):
     def __init__(self, vocab_size, block_size, n_embd, n_head, n_layer, dropout, lr):
