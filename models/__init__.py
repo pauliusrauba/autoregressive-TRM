@@ -5,15 +5,13 @@ from .gpt_level2 import GPTLevel2
 from .ut import UT
 #from .ut_gpt import LitUnifiedGPTUT
 
+model_registry = {
+    "gpt": GPTBase,
+    "gpt_level1": GPTLevel1,
+    "gpt_level2": GPTLevel2,
+    "ut": UT
+}
 
 def build_model(name: str, **kwargs):
-    if name == "gpt":
-        return GPTBase(**kwargs)
-    elif name == "gpt_level1":
-        return GPTLevel1(**kwargs)
-    elif name == "gpt_level2":
-        return GPTLevel2(**kwargs)
-    elif name == "gpt_level3" or name == "ut":
-        return UT(**kwargs)
-    else:
-        raise ValueError(f"Unknown model name: {name}")
+    ModelClass = model_registry[name]
+    return ModelClass(**kwargs)
