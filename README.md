@@ -20,18 +20,6 @@ Examples to launch the code:
 - 
 ```
 python train.py \
-  --model gpt_level3 \
-  --dataset addition_char \
-  --run-name 'gpt-level3' \
-  --n-head 6 \
-  --n-layer 6 \
-  --block-size 256 \
-  --algo-train-len 20 \
-  --dropout 0.1 \
-  --gpu 1 \
-  --algo-eval-extrap-len 40
-
-python train.py \
   --model ut\
   --dataset addition_char \
   --n-head 6 \
