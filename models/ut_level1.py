@@ -1,78 +1,11 @@
-# models/gpt.py
-import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pytorch_lightning as pl
+from models.common.trainer import BaseLitGPT
+from models.common.layers import Block
 
 
-class Head(nn.Module):
-    def __init__(self, n_embd, head_size, block_size, dropout):
-        super().__init__()
-        self.key = nn.Linear(n_embd, head_size, bias=False)
-        self.query = nn.Linear(n_embd, head_size, bias=False)
-        self.value = nn.Linear(n_embd, head_size, bias=False)
-        self.register_buffer('tril', torch.tril(torch.ones(block_size, block_size)))
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x):
-        B, T, C = x.shape
-        k = self.key(x)   # (B, T, hs)
-        q = self.query(x) # (B, T, hs)
-        wei = q @ k.transpose(-2, -1) * (k.shape[-1] ** -0.5)  # (B, T, T)
-        wei = wei.masked_fill(self.tril[:T, :T] == 0, float('-inf'))
-        wei = F.softmax(wei, dim=-1)
-        wei = self.dropout(wei)
-        v = self.value(x)  # (B, T, hs)
-        out = wei @ v      # (B, T, hs)
-        return out
-
-
-class MultiHeadAttention(nn.Module):
-    def __init__(self, n_embd, num_heads, head_size, block_size, dropout):
-        super().__init__()
-        self.heads = nn.ModuleList(
-            [Head(n_embd, head_size, block_size, dropout) for _ in range(num_heads)]
-        )
-        self.proj = nn.Linear(head_size * num_heads, n_embd)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x):
-        out = torch.cat([h(x) for h in self.heads], dim=-1)
-        out = self.dropout(self.proj(out))
-        return out
-
-
-class FeedForward(nn.Module):
-    def __init__(self, n_embd, dropout):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(n_embd, 4 * n_embd),
-            nn.ReLU(),
-            nn.Linear(4 * n_embd, n_embd),
-            nn.Dropout(dropout),
-        )
-
-    def forward(self, x):
-        return self.net(x)
-
-
-class Block(nn.Module):
-    def __init__(self, n_embd, n_head, block_size, dropout):
-        super().__init__()
-        head_size = n_embd // n_head
-        self.ln1 = nn.LayerNorm(n_embd)
-        self.sa = MultiHeadAttention(n_embd, n_head, head_size, block_size, dropout)
-        self.ln2 = nn.LayerNorm(n_embd)
-        self.ffwd = FeedForward(n_embd, dropout)
-
-    def forward(self, x):
-        x = x + self.sa(self.ln1(x))
-        x = x + self.ffwd(self.ln2(x))
-        return x
-
-
-class LitGPTLevel3(pl.LightningModule):
+class UTLevel1(BaseLitGPT):
     def __init__(
         self,
         vocab_size: int,
@@ -84,12 +17,17 @@ class LitGPTLevel3(pl.LightningModule):
         lr: float,
         ponder_cost_weight: float = 0.01
     ):
-        super().__init__()
+        super().__init__(vocab_size, block_size, n_embd, lr)
         self.save_hyperparameters()
 
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
         self.step_embedding_table = nn.Embedding(n_layer, n_embd)
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
+        
+        # Change: Add a learnable reasoning parameter
+        self.reasoning_param = nn.Parameter(torch.randn(n_embd) * 0.02)
+
+
         self.shared_block = Block(n_embd, n_head, block_size, dropout)
         self.halt_head = nn.Linear(n_embd, 1)
 
@@ -104,14 +42,6 @@ class LitGPTLevel3(pl.LightningModule):
 
         self.apply(self._init_weights)
 
-    def _init_weights(self, module):
-        if isinstance(module, nn.Linear):
-            nn.init.normal_(module.weight, mean=0.0, std=0.02)
-            if module.bias is not None:
-                nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.Embedding):
-            nn.init.normal_(module.weight, mean=0.0, std=0.02)
-
     def forward(self, idx, targets=None):
         B, T = idx.shape
         device = idx.device
@@ -121,6 +51,13 @@ class LitGPTLevel3(pl.LightningModule):
         pos = torch.arange(T, device=device)
         pos_emb = self.position_embedding_table(pos)  # (T, C)
         x = tok_emb + pos_emb  # (B, T, C)
+
+        # Change: Add reasoning parameter to the input
+        x = x + self.reasoning_param.unsqueeze(0).unsqueeze(1)  # (B, T, C)
+        
+        # New for this level: Initialize the reasoning state
+        solution = x.clone()
+        reasoning = self.reasoning_param.view(1, 1, -1).expand(B, T, -1).clone()
 
         # ===== ACT Tensors =====
         halted = torch.zeros(B, T, dtype=torch.bool, device=device)  # Which positions have halted
@@ -135,12 +72,20 @@ class LitGPTLevel3(pl.LightningModule):
                 torch.tensor(step, device=device)
             )  # (C,)
             
-            # Apply shared block
-            u = x + step_emb  # (B, T, C)
-            x_new = self.shared_block(u)  # (B, T, C)
+            # ==== New for this level ====
+            cond_z = solution + x
+            u_z = reasoning + cond_z + step_emb
+            reasoning_new = self.shared_block(u_z)
+
+            # ==== Update the solution
+            cond_y = reasoning_new
+            u_y = solution + cond_y + step_emb
+            solution_new = self.shared_block(u_y)
+
+            # ==== finish the new logic ===
 
             # Compute halting probability for each position
-            halt_logits = self.halt_head(x_new).squeeze(-1)  # (B, T)
+            halt_logits = self.halt_head(solution_new).squeeze(-1)  # (B, T)
             halt_prob = torch.sigmoid(halt_logits)  # (B, T)
 
             # For positions that haven't halted yet
@@ -165,7 +110,7 @@ class LitGPTLevel3(pl.LightningModule):
             )
             
             # Accumulate weighted outputs
-            output_accum = output_accum + p.unsqueeze(-1) * x_new
+            output_accum = output_accum + p.unsqueeze(-1) * solution_new
             
             # Update cumulative halt probability (only for running positions)
             halt_probs_accum = torch.where(
@@ -181,7 +126,7 @@ class LitGPTLevel3(pl.LightningModule):
             halted = halted | new_halted
             
             # Update state for next iteration (only matters for non-halted)
-            x = x_new
+            x = solution_new
             
             # Early exit if all positions have halted
             if halted.all():
@@ -212,19 +157,7 @@ class LitGPTLevel3(pl.LightningModule):
 
         return logits, loss
 
-    @torch.no_grad()
-    def generate(self, idx, max_new_tokens: int):
-        """Greedy sampling wrapper (returns token ids; decoding is dataset-specific)."""
-        self.eval()
-        for _ in range(max_new_tokens):
-            idx_cond = idx[:, -self.hparams.block_size:]
-            logits, _ = self(idx_cond)       # (B, T, V)
-            logits = logits[:, -1, :]        # (B, V)
-            probs = F.softmax(logits, dim=-1)
-            idx_next = torch.multinomial(probs, num_samples=1)  # (B, 1)
-            idx = torch.cat((idx, idx_next), dim=1)             # (B, T+1)
-        return idx
-
+   
     # Lightning hooks
     def training_step(self, batch, batch_idx):
         x, y = batch
@@ -240,18 +173,4 @@ class LitGPTLevel3(pl.LightningModule):
         self.log('ponder_cost', self._last_ponder_cost, on_step=True, on_epoch=False, prog_bar=True, batch_size=x.size(0))
 
         return loss
-
-    def validation_step(self, batch, batch_idx):
-        x, y = batch
-        _, loss = self(x, y)
-        self.log(
-            'val_loss',
-            loss,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
-            batch_size=x.size(0),
-        )
-
-    def configure_optimizers(self):
-        return torch.optim.AdamW(self.parameters(), lr=self.hparams.lr)
+        

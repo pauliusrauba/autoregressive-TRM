@@ -28,7 +28,7 @@ class UT(BaseLitGPT):
 
         # Store ACT hyperparams
         self.max_steps = n_layer
-        self.halt_threshold = 1.0 - 1e-6 # For numerical stabilitt
+        self.halt_threshold = 1.0 - 1e-6 # For numerical stability
         self.act_epsilon = 0.01 # for bias initialization
 
         self.ln_f = nn.LayerNorm(n_embd)

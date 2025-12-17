@@ -5,8 +5,6 @@ import torch.nn.functional as F
 from models.common.trainer import BaseLitGPT
 from models.common.layers import Block
 
-
-
 class GPTLevel1(BaseLitGPT):
     def __init__(self, vocab_size, block_size, n_embd, n_head, n_layer, dropout, lr):
         super().__init__(vocab_size, block_size, n_embd, lr)
