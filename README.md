@@ -16,8 +16,6 @@ Then the changes from UT toward TRM are also implemented in 2 sub-models and res
 - trm
 
 Examples to launch the code:
-
-- 
 ```
 python train.py \
   --model ut\
