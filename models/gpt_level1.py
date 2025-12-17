@@ -5,19 +5,18 @@ import torch.nn.functional as F
 from models.trainer import BaseLitGPT
 from models.layers import Block
 
-class GPTBase(BaseLitGPT):
-    """Standard GPT model."""
+
+class GPTLevel1(BaseLitGPT):
     def __init__(self, vocab_size, block_size, n_embd, n_head, n_layer, dropout, lr):
-        # Pass args to Base so they are saved
         super().__init__(vocab_size, block_size, n_embd, lr)
         
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
         
-        # Standard: Sequential blocks
-        self.blocks = nn.Sequential(
-            *[Block(n_embd, n_head, block_size, dropout) for _ in range(n_layer)]
-        )
+        # Level 1 Change: Single shared block
+        self.shared_block = Block(n_embd, n_head, block_size, dropout)
+        self.n_layer = n_layer
+        
         self.ln_f = nn.LayerNorm(n_embd)
         self.lm_head = nn.Linear(n_embd, vocab_size)
         
@@ -29,8 +28,10 @@ class GPTBase(BaseLitGPT):
         pos_emb = self.position_embedding_table(torch.arange(T, device=idx.device))
         x = tok_emb + pos_emb
         
-        x = self.blocks(x)  # Standard sequential pass
-        
+        # Level 1 Change: Reusing the same block
+        for _ in range(self.n_layer):
+            x = self.shared_block(x)
+            
         x = self.ln_f(x)
         logits = self.lm_head(x)
         

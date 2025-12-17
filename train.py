@@ -62,6 +62,13 @@ def parse_args():
         default=0.01,
         help="Ponder cost coefficient (level 6).",
     )
+    parser.add_argument(
+        "--gpu",
+        type=int,
+        default=None,
+        help="GPU device ID to use (e.g., 0 or 1). If not specified, uses first available GPU.",
+    )
+
 
     # Training hyperparameters
     parser.add_argument("--batch-size", type=int, default=64)
@@ -75,6 +82,20 @@ def parse_args():
     parser.add_argument("--algo-val-len", type=int, default=40)
     parser.add_argument("--algo-train-examples", type=int, default=50000)
     parser.add_argument("--algo-val-examples", type=int, default=5000)
+
+    # Algorithmic eval callback args
+    parser.add_argument(
+        "--algo-eval-extrap-len",
+        type=int,
+        default=400,
+        help="Sequence length for extrapolation evaluation (default: 400)",
+    )
+    parser.add_argument(
+        "--algo-eval-n",
+        type=int,
+        default=100,
+        help="Number of samples per evaluation spec (default: 100)",
+    )
 
     return parser.parse_args()
 
@@ -109,35 +130,22 @@ def main():
         lr=args.lr,
     )
 
-    # Only pass level/UT/ACT args to the unified model so existing "gpt" runs stay untouched.
-    if args.model == "ut_gpt":
-        model_kwargs.update(
-            dict(
-                level=args.level,
-                num_steps=args.num_steps,        # None is fine; model defaults to n_layer
-                max_steps=args.ut_max_steps,     # maps to model's max_steps
-                act_threshold=args.act_threshold,
-                act_loss_weight=args.act_loss_weight,
-            )
-        )
-
     model = build_model(args.model, **model_kwargs)
 
     total_params = sum(p.numel() for p in model.parameters()) / 1e6
     print(f"Model: {args.model}, Dataset: {args.dataset}")
     print(f"Parameters: {total_params:.2f}M")
 
-    # Weights & Biases logger
+# Weights & Biases logger
     wandb_logger = WandbLogger(
         project="icml-recursive-llms",
-        name=args.run_name or f"{args.model}-lvl{args.level}-{args.dataset}"
-        if args.model in ("ut_gpt")
-        else (args.run_name or f"{args.model}-{args.dataset}"),
+        name = args.run_name if args.run_name is not None else f"{args.model}-{args.dataset}-train-{args.algo_train_len}-eval-{args.algo_eval_extrap_len}",
         config=vars(args),
     )
 
     # 3) Checkpointing
-    ckpt_dir = os.path.join("checkpoints", f"{args.dataset}_{args.model}")
+    data_dir = "/mnt/pdata/pr501/icml2025"
+    ckpt_dir = os.path.join(data_dir, "checkpoints", f"{args.dataset}_{args.model}")
     os.makedirs(ckpt_dir, exist_ok=True)
 
     checkpoint_cb = ModelCheckpoint(
@@ -162,20 +170,27 @@ def main():
         
         # Evaluate at training length (in-distribution) and longer (extrapolation)
         algo_specs = [
-            AlgoEvalSpec(task=task, length=args.algo_train_len, n=100),  # in-distribution
-            AlgoEvalSpec(task=task, length=400, n=100),  # extrapolation (like eval_algorithmic.py)
+            AlgoEvalSpec(task=task, length=args.algo_train_len, n=args.algo_eval_n),  # in-distribution
+            AlgoEvalSpec(task=task, length=args.algo_eval_extrap_len, n=args.algo_eval_n),  # extrapolation
         ]
         algo_callback = AlgorithmicEvalCallback(specs=algo_specs, seed=args.seed)
         callbacks.append(algo_callback)
 
+    # Determine devices based on --gpu argument
+    if torch.cuda.is_available():
+        devices = [args.gpu] if args.gpu is not None else 1
+        accelerator = "gpu"
+    else:
+        devices = -1
+        accelerator = "cpu"
 
     # 4) Trainer
     trainer = pl.Trainer(
         max_steps=args.max_steps,
         val_check_interval=args.eval_interval,
         log_every_n_steps=50,
-        accelerator="gpu" if torch.cuda.is_available() else "cpu",
-        devices=1,
+        accelerator=accelerator,
+        devices=devices,
         enable_progress_bar=True,
         logger=wandb_logger,
         callbacks=callbacks,
