@@ -108,10 +108,12 @@ def parse_args():
 
     # Algorithmic eval callback args
     parser.add_argument(
-        "--algo-eval-extrap-len",
+        "--algo-eval-lengths",
         type=int,
-        default=400,
-        help="Sequence length for extrapolation evaluation (default: 400)",
+        nargs="+",
+        default=None,
+        help="Evaluation lengths (e.g., --algo-eval-lengths 20 40 60 80 100). "
+             "If not specified, defaults to [algo_train_len, 5*algo_train_len].",
     )
     parser.add_argument(
         "--algo-eval-n",
@@ -176,7 +178,7 @@ def main():
 # Weights & Biases logger
     wandb_logger = WandbLogger(
         project="icml-recursive-llms",
-        name = args.run_name if args.run_name is not None else f"{args.model}-{args.dataset}-train-{args.algo_train_len}-eval-{args.algo_eval_extrap_len}",
+        name = args.run_name if args.run_name is not None else f"{args.model}-{args.dataset}-train-{args.algo_train_len}-compute-{args.compute_budget}",
         config=vars(args),
     )
 
@@ -205,10 +207,17 @@ def main():
         }
         task = task_map[args.dataset]
         
-        # Evaluate at training length (in-distribution) and longer (extrapolation)
+        # Determine evaluation lengths
+        if args.algo_eval_lengths is not None:
+            eval_lengths = args.algo_eval_lengths
+        else:
+            # Default: training length and 5x training length
+            eval_lengths = [args.algo_train_len, 5 * args.algo_train_len]
+        
+        # Create eval specs for each length
         algo_specs = [
-            AlgoEvalSpec(task=task, length=args.algo_train_len, n=args.algo_eval_n),  # in-distribution
-            AlgoEvalSpec(task=task, length=args.algo_eval_extrap_len, n=args.algo_eval_n),  # extrapolation
+            AlgoEvalSpec(task=task, length=length, n=args.algo_eval_n)
+            for length in eval_lengths
         ]
         algo_callback = AlgorithmicEvalCallback(specs=algo_specs, seed=args.seed)
         callbacks.append(algo_callback)

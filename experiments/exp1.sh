@@ -20,7 +20,8 @@ set -euo pipefail
 
 COMPUTE_BUDGET=24          # Target block passes (adjust as needed)
 ALGO_TRAIN_LEN=20          # L_train
-ALGO_EVAL_EXTRAP_LEN=100   # 5x L_train for extrapolation
+# Evaluation lengths: L_train to 5x L_train
+ALGO_EVAL_LENGTHS="20 40 60 80 100"
 
 # Model architecture settings
 N_HEAD=6
@@ -90,7 +91,7 @@ wait_for_gpu() {
         # Both GPUs busy, wait for any job to finish
         sleep 5
     done
-done
+}
 
 # Run a single experiment
 run_experiment() {
@@ -113,7 +114,7 @@ run_experiment() {
         --block-size ${BLOCK_SIZE} \
         --dropout ${DROPOUT} \
         --algo-train-len ${ALGO_TRAIN_LEN} \
-        --algo-eval-extrap-len ${ALGO_EVAL_EXTRAP_LEN} \
+        --algo-eval-lengths ${ALGO_EVAL_LENGTHS} \
         --compute-budget ${COMPUTE_BUDGET} \
         --max-steps ${MAX_STEPS} \
         --batch-size ${BATCH_SIZE} \
@@ -143,7 +144,7 @@ log "Compute-Normalized Experiment Suite"
 log "=========================================="
 log "Compute Budget: ${COMPUTE_BUDGET} block passes"
 log "Training Length: ${ALGO_TRAIN_LEN}"
-log "Eval Extrapolation Length: ${ALGO_EVAL_EXTRAP_LEN}"
+log "Eval Lengths: ${ALGO_EVAL_LENGTHS}"
 log "Models: ${MODELS[*]}"
 log "Tasks: ${TASKS[*]}"
 log "=========================================="
