@@ -68,8 +68,8 @@ declare -A GPU_PIDS
 GPU_PIDS[0]=""
 GPU_PIDS[1]=""
 
-# Log file for tracking experiments
-LOGDIR="experiments/logs"
+# Log file for tracking experiments (on data mount for space)
+LOGDIR="/mnt/pdata/pr501/icml2025/experiment_logs"
 mkdir -p "${LOGDIR}"
 MASTER_LOG="${LOGDIR}/run_${TAG}_$(date +%Y%m%d_%H%M%S).log"
 
