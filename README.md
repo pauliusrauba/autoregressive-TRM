@@ -2,88 +2,26 @@
 
 Codebase for TRM (Transformer with Recursive Mechanism) LLMs research project.
 
-## Quick Start
+## Setup
 
-```bash
-# 1. Install UV (one-time)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-source ~/.bashrc
+1. Install [uv](https://docs.astral.sh/uv/):
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
 
-# 2. Setup (see detailed instructions below)
-./setup.sh  # or follow manual steps
+2. Install dependencies:
+   ```bash
+   uv sync
+   ```
 
-# 3. Run training
-uv run python train.py --model gpt --dataset addition_char
-```
-
-## Setup Instructions
-
-This project uses [UV](https://docs.astral.sh/uv/) for fast, reproducible dependency management.
-
-### Prerequisites
-
-- Linux (tested on Ubuntu)
-- ~5GB disk space for dependencies (can be on a data mount)
-- CUDA-capable GPU (optional, for training)
-
-### Step 1: Install UV
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-source ~/.bashrc  # or restart your terminal
-```
-
-### Step 2: Configure Data Directory
-
-Since dependencies are large (~5GB with PyTorch/CUDA), we store them on the data mount rather than the home directory.
-
-**Set your data directory** (adjust the path for your setup):
-
-```bash
-# Example: /mnt/pdata/YOUR_USERNAME/icml2025
-export DATA_DIR="/mnt/pdata/pr501/icml2025"
-```
-
-**Create the cache and venv directories:**
-
-```bash
-mkdir -p $DATA_DIR/.uv-cache
-mkdir -p $DATA_DIR/.venv
-```
-
-**Create a symlink for the virtual environment** (from the project directory):
-
-```bash
-cd /path/to/icml
-ln -sf $DATA_DIR/.venv .venv
-```
-
-**Add UV cache to your shell config** (`~/.bashrc`):
-
-```bash
-echo 'export UV_CACHE_DIR="/mnt/pdata/YOUR_USERNAME/icml2025/.uv-cache"' >> ~/.bashrc
-echo 'export UV_LINK_MODE=copy' >> ~/.bashrc
-source ~/.bashrc
-```
-
-### Step 3: Install Dependencies
-
-```bash
-cd /path/to/icml
-uv sync
-```
-
-This reads `uv.lock` and installs the exact same package versions for reproducibility.
-
-### Step 4: Verify Installation
-
-```bash
-uv run python -c "import torch; print(f'PyTorch {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
-```
+3. Verify installation:
+   ```bash
+   uv run python -c "import torch; print(f'PyTorch {torch.__version__}, CUDA: {torch.cuda.is_available()}')"
+   ```
 
 ## Running Code
 
-Always use `uv run` to execute Python scripts:
+Use `uv run` to execute Python scripts:
 
 ```bash
 uv run python train.py --model gpt --dataset addition_char
@@ -161,39 +99,35 @@ uv sync
 
 After adding/updating dependencies, commit both `pyproject.toml` and `uv.lock`.
 
-## Troubleshooting
-
-### "No space left on device"
-
-The UV cache and virtual environment need ~5GB. Make sure they're on a disk with enough space:
-
-```bash
-# Check where your .venv points
-ls -la .venv
-
-# If needed, move to data mount
-rm -rf .venv
-mkdir -p /your/data/mount/.venv
-ln -s /your/data/mount/.venv .venv
-uv sync
-```
-
-### UV command not found
-
-Add UV to your PATH:
-
-```bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
-```
-
 ## For Collaborators
 
 1. Clone the repo
-2. Follow the setup instructions above, using YOUR data directory path
-3. Run `uv sync` — this installs the exact versions from `uv.lock`
-4. You now have an identical environment!
+2. Run `uv sync` — this installs the exact versions from `uv.lock`
+3. You now have an identical environment!
 
 The key files for reproducibility:
 - `pyproject.toml` — dependency specifications
 - `uv.lock` — exact pinned versions (commit this!)
+
+## Advanced: Limited Disk Space Environments
+
+If you're on a shared HPC cluster with limited home directory quota, you may need to store the virtual environment and cache on a data mount:
+
+```bash
+# Set your data directory
+export DATA_DIR="/mnt/pdata/YOUR_USERNAME/icml2025"
+
+# Create directories
+mkdir -p $DATA_DIR/.uv-cache
+mkdir -p $DATA_DIR/.venv
+
+# Symlink .venv to data mount (from project directory)
+ln -sf $DATA_DIR/.venv .venv
+
+# Configure UV cache (add to ~/.bashrc)
+export UV_CACHE_DIR="$DATA_DIR/.uv-cache"
+export UV_LINK_MODE=copy
+
+# Then run uv sync as usual
+uv sync
+```
