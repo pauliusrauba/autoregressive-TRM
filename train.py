@@ -8,7 +8,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from callbacks.algorithmic_eval import AlgorithmicEvalCallback, AlgoEvalSpec
 
-from models import build_model
+from models import build_model, normalize_model_kwargs_for_compute, calculate_block_passes
 from data_modules import load_dataset
 
 def parse_args():
@@ -67,6 +67,29 @@ def parse_args():
         type=int,
         default=None,
         help="GPU device ID to use (e.g., 0 or 1). If not specified, uses first available GPU.",
+    )
+    
+    # Loop parameters for UTLevel2/TRM models
+    parser.add_argument(
+        "--n-inner-loops",
+        type=int,
+        default=None,
+        help="Number of inner loops for UTLevel2/TRM (default: 4 for UTLevel2, 2 for TRM)",
+    )
+    parser.add_argument(
+        "--n-outer-loops",
+        type=int,
+        default=None,
+        help="Number of outer loops for UTLevel2/TRM (default: 4 for UTLevel2, 2 for TRM)",
+    )
+    
+    # Compute budget for fair comparison experiments
+    parser.add_argument(
+        "--compute-budget",
+        type=int,
+        default=None,
+        help="Target compute budget in block passes. When set, adjusts n_layer (and loops for UTLevel2/TRM) "
+             "to match this budget across different models. Leave unset to use original parameters.",
     )
 
 
@@ -129,12 +152,26 @@ def main():
         dropout=args.dropout,
         lr=args.lr,
     )
+    
+    # Add loop parameters for UTLevel2/TRM if specified
+    if args.n_inner_loops is not None:
+        model_kwargs['n_inner_loops'] = args.n_inner_loops
+    if args.n_outer_loops is not None:
+        model_kwargs['n_outer_loops'] = args.n_outer_loops
+
+    # Apply compute budget normalization if specified
+    model_kwargs, compute_summary = normalize_model_kwargs_for_compute(
+        args.model,
+        model_kwargs,
+        compute_budget=args.compute_budget, # This becomes the effective n_layers
+    )
 
     model = build_model(args.model, **model_kwargs)
 
     total_params = sum(p.numel() for p in model.parameters()) / 1e6
     print(f"Model: {args.model}, Dataset: {args.dataset}")
     print(f"Parameters: {total_params:.2f}M")
+    print(f"Compute: {compute_summary}")
 
 # Weights & Biases logger
     wandb_logger = WandbLogger(

@@ -6,6 +6,12 @@ from .ut import UT
 from .ut_level1 import UTLevel1
 from .ut_level2 import UTLevel2
 from .trm import TRM
+from .common.compute import (
+    calculate_block_passes,
+    adjust_params_for_compute_budget,
+    get_compute_summary,
+    normalize_model_kwargs_for_compute,
+)
 
 #from .ut_gpt import LitUnifiedGPTUT
 
