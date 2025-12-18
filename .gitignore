@@ -1,7 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+
+# UV / Virtual environment
+.venv
+.venv/
+
+# Project artifacts
 checkpoints/
 wandb/
 lightning_logs/
-models/__pycache__/
 data/
-data_modules/__pycache__/
-models/common/__pycache__/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
