@@ -250,3 +250,33 @@ MAX_STEPS=6500              # Training steps
 ```
 
 Results are logged to W&B project: `icml-recursive-llms`
+
+---
+Summary of Changes
+1. Model Changes (4 files)
+Added max_act_steps parameter to all ACT models, decoupling inference compute from n_layer:
+models/ut.py - UT now accepts max_act_steps (defaults to n_layer for backward compatibility)
+models/ut_level1.py - Same change
+models/ut_level2.py - Same change
+models/trm.py - Same change
+Key changes in each model:
+# New parametermax_act_steps: int = None# Step embedding table now sized to max_act_stepsself.step_embedding_table = nn.Embedding(self.max_act_steps, n_embd)# Forward loop uses max_act_stepsfor step in range(self.max_act_steps):
+2. Training Script (train.py)
+Added two new command-line arguments:
+--max-act-steps - Override max ACT steps for recurrent models
+--ponder-cost-weight - Override ponder cost weight (set to 0 to disable penalty)
+3. New Experiment Script (experiments/exp2_param_normalized.sh)
+Parameter-normalized experiments with:
+MAX_ACT_STEPS=64 (vs 4-24 in exp1)
+PONDER_COST_WEIGHT=0.0 (no penalty for thinking)
+MAX_STEPS=15000 (longer training)
+Same architecture for all shared-block models (~1.9M params)
+4. Inference Scaling Eval Script (eval_inference_scaling.py)
+New script to test trained checkpoints with varying inference budgets:
+python eval_inference_scaling.py \    --ckpt-dir /mnt/pdata/pr501/icml2025/checkpoints \    --max-act-steps 8 16 32 64 128 \    --output results_inference_scaling.csv
+How to Run
+Run the new parameter-normalized experiments:
+cd /home/azureuser/icml./experiments/exp2_param_normalized.sh
+Evaluate existing checkpoints with inference scaling:
+python eval_inference_scaling.py \    --ckpt-dir /mnt/pdata/pr501/icml2025/checkpoints \    --max-act-steps 8 16 32 64 128
+The output CSV can be used to create compute-efficiency frontier plots (inference compute on x-axis, accuracy on y-axis).
