@@ -15,19 +15,24 @@ class UT(BaseLitGPT):
         n_layer: int,
         dropout: float,
         lr: float,
-        ponder_cost_weight: float = 0.01
+        ponder_cost_weight: float = 0.01,
+        max_act_steps: int = None,
     ):
         super().__init__(vocab_size, block_size, n_embd, lr)
         self.save_hyperparameters()
 
+        # max_act_steps controls how many ACT steps the model can use
+        # If not specified, defaults to n_layer for backward compatibility
+        self.max_act_steps = max_act_steps if max_act_steps is not None else n_layer
+
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
-        self.step_embedding_table = nn.Embedding(n_layer, n_embd)
+        self.step_embedding_table = nn.Embedding(self.max_act_steps, n_embd)
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
         self.shared_block = Block(n_embd, n_head, block_size, dropout)
         self.halt_head = nn.Linear(n_embd, 1)
 
         # Store ACT hyperparams
-        self.max_steps = n_layer
+        self.max_steps = self.max_act_steps
         self.halt_threshold = 1.0 - 1e-6 # For numerical stability
         self.act_epsilon = 0.01 # for bias initialization
 
@@ -54,7 +59,7 @@ class UT(BaseLitGPT):
         n_updates = torch.zeros(B, T, device=device)  # Number of updates per position
         output_accum = torch.zeros(B, T, self.hparams.n_embd, device=device)  # Weighted state accumulator
 
-        for step in range(self.hparams.n_layer):
+        for step in range(self.max_act_steps):
             # Get step embedding
             step_emb = self.step_embedding_table(
                 torch.tensor(step, device=device)
