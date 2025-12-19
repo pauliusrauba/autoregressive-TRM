@@ -192,7 +192,9 @@ class AlgorithmicEvalCallback(pl.Callback):
                 metrics[f"{prefix}/{key}"] = value
 
         # Update trainer's callback_metrics so ModelCheckpoint can see them
-        trainer.callback_metrics.update(metrics)
+        # Convert to tensors as required by Lightning's metric comparison
+        tensor_metrics = {k: torch.tensor(v) for k, v in metrics.items()}
+        trainer.callback_metrics.update(tensor_metrics)
         
         # Also log to W&B at the current global step for proper alignment
         if trainer.logger is not None:
