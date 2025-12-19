@@ -258,10 +258,11 @@ def main():
         perf_metric = f"TaskEvaluation/{task}/L{args.algo_train_len}/seq_acc"
         best_perf_checkpoint_cb = ModelCheckpoint(
             dirpath=ckpt_dir,
-            filename="best_seq_acc-step={step:05d}-acc={" + perf_metric + ":.4f}",
+            filename="best_seq_acc",
             monitor=perf_metric,
             mode="max",  # Maximize accuracy
             save_top_k=1,
+            save_on_train_epoch_end=False,  # Save after validation, not training epoch
         )
         callbacks.append(best_perf_checkpoint_cb)
 
