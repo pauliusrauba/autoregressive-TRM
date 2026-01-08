@@ -259,8 +259,12 @@ models/ut.py - UT now accepts max_act_steps (defaults to n_layer for backward co
 models/ut_level1.py - Same change
 models/ut_level2.py - Same change
 models/trm.py - Same change
+
 Key changes in each model:
-# New parametermax_act_steps: int = None# Step embedding table now sized to max_act_stepsself.step_embedding_table = nn.Embedding(self.max_act_steps, n_embd)# Forward loop uses max_act_stepsfor step in range(self.max_act_steps):
+
+1. New parameter
+max_act_steps: int = None
+
 2. Training Script (train.py)
 Added two new command-line arguments:
 --max-act-steps - Override max ACT steps for recurrent models
