@@ -23,3 +23,8 @@ data/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Other
+callbacks/__pycache__/
+data_modules/__pycache__/
+models/common/__pycache__/
