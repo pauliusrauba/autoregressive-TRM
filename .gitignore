@@ -8,27 +8,22 @@ __pycache__/
 # UV / Virtual environment
 .venv
 .venv/
-
 # Project artifacts
 checkpoints/
 wandb/
 lightning_logs/
 data/
-
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-
 # Jupyter
 .ipynb_checkpoints/
-
 # Other
 callbacks/__pycache__/
 data_modules/__pycache__/
-models/common/__pycache__/.venv
-.venv/
-**/__pycache__/
-*.pyc
-.ipynb_checkpoints/
+models/common/__pycache__/
+*.pyo
+# Virtual envs
+venv/
