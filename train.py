@@ -8,7 +8,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from callbacks.algorithmic_eval import AlgorithmicEvalCallback, AlgoEvalSpec
 
-from models import build_model
+from models import build_model, normalize_model_kwargs_for_compute, calculate_block_passes
 from data_modules import load_dataset
 
 def parse_args():
@@ -68,6 +68,29 @@ def parse_args():
         default=None,
         help="GPU device ID to use (e.g., 0 or 1). If not specified, uses first available GPU.",
     )
+    
+    # Loop parameters for UTLevel2/TRM models
+    parser.add_argument(
+        "--n-inner-loops",
+        type=int,
+        default=None,
+        help="Number of inner loops for UTLevel2/TRM (default: 4 for UTLevel2, 2 for TRM)",
+    )
+    parser.add_argument(
+        "--n-outer-loops",
+        type=int,
+        default=None,
+        help="Number of outer loops for UTLevel2/TRM (default: 4 for UTLevel2, 2 for TRM)",
+    )
+    
+    # Compute budget for fair comparison experiments
+    parser.add_argument(
+        "--compute-budget",
+        type=int,
+        default=None,
+        help="Target compute budget in block passes. When set, adjusts n_layer (and loops for UTLevel2/TRM) "
+             "to match this budget across different models. Leave unset to use original parameters.",
+    )
 
 
     # Training hyperparameters
@@ -85,10 +108,12 @@ def parse_args():
 
     # Algorithmic eval callback args
     parser.add_argument(
-        "--algo-eval-extrap-len",
+        "--algo-eval-lengths",
         type=int,
-        default=400,
-        help="Sequence length for extrapolation evaluation (default: 400)",
+        nargs="+",
+        default=None,
+        help="Evaluation lengths (e.g., --algo-eval-lengths 20 40 60 80 100). "
+             "If not specified, defaults to [algo_train_len, 5*algo_train_len].",
     )
     parser.add_argument(
         "--algo-eval-n",
@@ -129,17 +154,31 @@ def main():
         dropout=args.dropout,
         lr=args.lr,
     )
+    
+    # Add loop parameters for UTLevel2/TRM if specified
+    if args.n_inner_loops is not None:
+        model_kwargs['n_inner_loops'] = args.n_inner_loops
+    if args.n_outer_loops is not None:
+        model_kwargs['n_outer_loops'] = args.n_outer_loops
+
+    # Apply compute budget normalization if specified
+    model_kwargs, compute_summary = normalize_model_kwargs_for_compute(
+        args.model,
+        model_kwargs,
+        compute_budget=args.compute_budget, # This becomes the effective n_layers
+    )
 
     model = build_model(args.model, **model_kwargs)
 
     total_params = sum(p.numel() for p in model.parameters()) / 1e6
     print(f"Model: {args.model}, Dataset: {args.dataset}")
     print(f"Parameters: {total_params:.2f}M")
+    print(f"Compute: {compute_summary}")
 
 # Weights & Biases logger
     wandb_logger = WandbLogger(
         project="icml-recursive-llms",
-        name = args.run_name if args.run_name is not None else f"{args.model}-{args.dataset}-train-{args.algo_train_len}-eval-{args.algo_eval_extrap_len}",
+        name = args.run_name if args.run_name is not None else f"{args.model}-{args.dataset}-train-{args.algo_train_len}-compute-{args.compute_budget}",
         config=vars(args),
     )
 
@@ -168,10 +207,17 @@ def main():
         }
         task = task_map[args.dataset]
         
-        # Evaluate at training length (in-distribution) and longer (extrapolation)
+        # Determine evaluation lengths
+        if args.algo_eval_lengths is not None:
+            eval_lengths = args.algo_eval_lengths
+        else:
+            # Default: training length and 5x training length
+            eval_lengths = [args.algo_train_len, 5 * args.algo_train_len]
+        
+        # Create eval specs for each length
         algo_specs = [
-            AlgoEvalSpec(task=task, length=args.algo_train_len, n=args.algo_eval_n),  # in-distribution
-            AlgoEvalSpec(task=task, length=args.algo_eval_extrap_len, n=args.algo_eval_n),  # extrapolation
+            AlgoEvalSpec(task=task, length=length, n=args.algo_eval_n)
+            for length in eval_lengths
         ]
         algo_callback = AlgorithmicEvalCallback(specs=algo_specs, seed=args.seed)
         callbacks.append(algo_callback)

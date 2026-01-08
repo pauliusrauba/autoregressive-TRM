@@ -27,4 +27,8 @@ data/
 # Other
 callbacks/__pycache__/
 data_modules/__pycache__/
-models/common/__pycache__/
+models/common/__pycache__/.venv
+.venv/
+**/__pycache__/
+*.pyc
+.ipynb_checkpoints/

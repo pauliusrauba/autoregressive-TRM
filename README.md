@@ -67,16 +67,13 @@ uv run python train.py \
   --block-size 256 \
   --algo-train-len 20 \
   --dropout 0.1 \
-  --gpu 1 \
-  --algo-eval-extrap-len 40
+  --gpu 0
+```
 
 # Train TRM on addition task
 uv run python train.py \
   --model trm \
   --dataset addition_char \
-  --n-head 6 \
-  --n-layer 6 \
-  --block-size 256 \
   --algo-train-len 20 \
   --dropout 0.1 \
   --gpu 0 \
