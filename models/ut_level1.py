@@ -1,8 +1,21 @@
+# models/ut_level1.py
+"""
+Universal Transformer Level 1: Dual-Stream Reasoning.
+
+Delta from UT:
+  - Adds dual-stream state (solution + reasoning)
+  - Two block calls per step instead of one
+  
+The key insight: separating "thinking" from "answering" may help
+the model develop better intermediate representations.
+"""
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from models.common.trainer import BaseLitGPT
 from models.common.layers import Block
+from models.common.act import ACTController, ACTState
+from models.common.dual_stream import DualStreamState, DualStreamStep
 
 
 class UTLevel1(BaseLitGPT):
@@ -21,28 +34,21 @@ class UTLevel1(BaseLitGPT):
         super().__init__(vocab_size, block_size, n_embd, lr)
         self.save_hyperparameters()
 
-        # max_act_steps controls how many ACT steps the model can use
-        # If not specified, defaults to n_layer for backward compatibility
         self.max_act_steps = max_act_steps if max_act_steps is not None else n_layer
 
+        # === Same as UT ===
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
         self.step_embedding_table = nn.Embedding(self.max_act_steps, n_embd)
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
-        
-        # Change: Add a learnable reasoning parameter
-        self.reasoning_param = nn.Parameter(torch.randn(n_embd) * 0.02)
-
         self.shared_block = Block(n_embd, n_head, block_size, dropout)
-        self.halt_head = nn.Linear(n_embd, 1)
-
-        # Store ACT hyperparams
-        self.max_steps = self.max_act_steps
-        self.halt_threshold = 1.0 - 1e-6 # For numerical stability
-        self.act_epsilon = 0.01 # for bias initialization
-
         self.ln_f = nn.LayerNorm(n_embd)
         self.lm_head = nn.Linear(n_embd, vocab_size)
         self.n_layer = n_layer
+        self.act = ACTController(n_embd)
+
+        # === NEW: Dual-stream components ===
+        self.reasoning_param = nn.Parameter(torch.randn(n_embd) * 0.02)
+        self.dual_step = DualStreamStep(self.shared_block)
 
         self.apply(self._init_weights)
 
@@ -51,130 +57,44 @@ class UTLevel1(BaseLitGPT):
         device = idx.device
         assert T <= self.hparams.block_size
 
-        tok_emb = self.token_embedding_table(idx)  # (B, T, C)
-        pos = torch.arange(T, device=device)
-        pos_emb = self.position_embedding_table(pos)  # (T, C)
-        x = tok_emb + pos_emb  # (B, T, C)
+        # Embeddings
+        tok_emb = self.token_embedding_table(idx)
+        pos_emb = self.position_embedding_table(torch.arange(T, device=device))
+        x_input = tok_emb + pos_emb
 
-        # Change: Add reasoning parameter to the input
-        x = x + self.reasoning_param.unsqueeze(0).unsqueeze(1)  # (B, T, C)
+        # === NEW: Initialize dual-stream state ===
+        stream = DualStreamState.init(x_input, self.reasoning_param)
         
-        # New for this level: Initialize the reasoning state
-        solution = x.clone()
-        reasoning = self.reasoning_param.view(1, 1, -1).expand(B, T, -1).clone()
-
-        # ===== ACT Tensors =====
-        halted = torch.zeros(B, T, dtype=torch.bool, device=device)  # Which positions have halted
-        halt_probs_accum = torch.zeros(B, T, device=device)  # Cumulative halting probability
-        remainders = torch.zeros(B, T, device=device)  # Remainder for final step
-        n_updates = torch.zeros(B, T, device=device)  # Number of updates per position
-        output_accum = torch.zeros(B, T, self.hparams.n_embd, device=device)  # Weighted state accumulator
+        act_state = ACTState.init(B, T, self.hparams.n_embd, device)
 
         for step in range(self.max_act_steps):
-            # Get step embedding
-            step_emb = self.step_embedding_table(
-                torch.tensor(step, device=device)
-            )  # (C,)
+            step_emb = self.step_embedding_table(torch.tensor(step, device=device))
             
-            # ==== New for this level ====
-            cond_z = solution + x
-            u_z = reasoning + cond_z + step_emb
-            reasoning_new = self.shared_block(u_z)
-
-            # ==== Update the solution
-            cond_y = reasoning_new
-            u_y = solution + cond_y + step_emb
-            solution_new = self.shared_block(u_y)
-
-            # ==== finish the new logic ===
-
-            # Compute halting probability for each position
-            halt_logits = self.halt_head(solution_new).squeeze(-1)  # (B, T)
-            halt_prob = torch.sigmoid(halt_logits)  # (B, T)
-
-            # For positions that haven't halted yet
-            still_running = ~halted  # (B, T)
+            # === NEW: Dual-stream update (replaces single block call) ===
+            stream = self.dual_step(stream, step_emb)
             
-            # Check which positions will halt at this step
-            new_halted = (halt_probs_accum + halt_prob >= self.halt_threshold) & still_running
-            
-            # For newly halted positions, remainder = 1 - accumulated so far
-            remainders = torch.where(
-                new_halted,
-                1.0 - halt_probs_accum,
-                remainders
-            )
-            
-            # For still running (but not newly halted), use the halt_prob
-            # For newly halted, use the remainder
-            p = torch.where(
-                new_halted,
-                remainders,
-                torch.where(still_running, halt_prob, torch.zeros_like(halt_prob))
-            )
-            
-            # Accumulate weighted outputs
-            output_accum = output_accum + p.unsqueeze(-1) * solution_new
-            
-            # Update cumulative halt probability (only for running positions)
-            halt_probs_accum = torch.where(
-                still_running & ~new_halted,
-                halt_probs_accum + halt_prob,
-                halt_probs_accum
-            )
-            
-            # Track number of updates
-            n_updates = n_updates + still_running.float()
-            
-            # Update halted mask
-            halted = halted | new_halted
-            
-            # Update state for next iteration (only matters for non-halted)
-            x = solution_new
-            
-            # Early exit if all positions have halted
-            if halted.all():
+            # ACT uses solution state for halting decision
+            act_state, all_halted = self.act.step(stream.solution, act_state, step)
+            if all_halted:
                 break
 
-        # For any positions that never halted by max_steps, assign remainder
-        still_running = ~halted
-        remainders = torch.where(still_running, 1.0 - halt_probs_accum, remainders)
-        output_accum = output_accum + (still_running.float() * remainders).unsqueeze(-1) * x
+        x, ponder_cost = self.act.finalize(stream.solution, act_state)
+        self._last_ponder_cost = ponder_cost.item()
 
-        # Compute ponder cost: sum of (n_updates + remainder) across positions
-        ponder_cost = (n_updates + remainders).mean()  # Mean over batch and positions
-        self._last_ponder_cost = ponder_cost.item() # Store for logging
-
-        x = output_accum
         x = self.ln_f(x)
-        logits = self.lm_head(x)  # (B, T, V)
+        logits = self.lm_head(x)
 
         loss = None
         if targets is not None:
             B, T, C = logits.shape
-            ce_loss = F.cross_entropy(
-                logits.view(B * T, C),
-                targets.view(B * T),
-            )
-            # Add ponder cost to loss
+            ce_loss = F.cross_entropy(logits.view(B * T, C), targets.view(B * T))
             loss = ce_loss + self.hparams.ponder_cost_weight * ponder_cost
 
         return logits, loss
 
-   
-    # Lightning hooks
     def training_step(self, batch, batch_idx):
         x, y = batch
         _, loss = self(x, y)
-        self.log(
-            'train_loss',
-            loss,
-            on_step=True,
-            on_epoch=False,
-            prog_bar=True,
-            batch_size=x.size(0),
-        )
+        self.log('train_loss', loss, on_step=True, on_epoch=False, prog_bar=True, batch_size=x.size(0))
         self.log('ponder_cost', self._last_ponder_cost, on_step=True, on_epoch=False, prog_bar=True, batch_size=x.size(0))
-
         return loss
-        
