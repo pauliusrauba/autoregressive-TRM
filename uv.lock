@@ -702,6 +702,9 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "datasets" },
+    { name = "ipykernel" },
+    { name = "jupyterlab" },
+    { name = "notebook" },
     { name = "pytorch-lightning" },
     { name = "torch" },
     { name = "wandb" },
@@ -716,8 +719,11 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "datasets", specifier = ">=4.4.1" },
+    { name = "ipykernel", specifier = ">=7.1.0" },
     { name = "ipykernel", marker = "extra == 'dev'" },
     { name = "jupyter", marker = "extra == 'dev'" },
+    { name = "jupyterlab", specifier = ">=4.5.1" },
+    { name = "notebook", specifier = ">=7.5.1" },
     { name = "pytorch-lightning", specifier = ">=2.0.0" },
     { name = "torch", specifier = ">=2.0.0" },
     { name = "wandb", specifier = ">=0.15.0" },
