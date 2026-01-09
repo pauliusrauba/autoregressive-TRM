@@ -25,19 +25,23 @@ class DualStreamState:
     @classmethod
     def init(
         cls, 
-        x_input: torch.Tensor,  # (B, T, C)
+        x_input: torch.Tensor,  # (B, T, C) - raw embeddings (tok + pos)
         reasoning_param: nn.Parameter,  # (C,)
     ) -> "DualStreamState":
-        """Initialize dual-stream state from input embeddings."""
-        B, T, C = x_input.shape
+        """
+        Initialize dual-stream state from input embeddings.
         
-        # Add reasoning bias to input
-        x_with_bias = x_input + reasoning_param.unsqueeze(0).unsqueeze(1)
+        - x_input: kept unbiased (static reference to original input)
+        - solution: biased with reasoning_param (starting point for answer)
+        - reasoning: initialized to reasoning_param
+        """
+        B, T, C = x_input.shape
+        reasoning_bias = reasoning_param.unsqueeze(0).unsqueeze(1)  # (1, 1, C)
         
         return cls(
-            solution=x_with_bias.clone(),
+            solution=x_input + reasoning_bias,  # biased starting point
             reasoning=reasoning_param.view(1, 1, -1).expand(B, T, -1).clone(),
-            x_input=x_with_bias,
+            x_input=x_input,  # UNBIASED - no reasoning_param here
         )
 
 
