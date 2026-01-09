@@ -24,52 +24,100 @@ class CharTokenizer:
 
 
 class RandomChunkTrain(IterableDataset):
-    """Infinite iterator for training; each sample is a random (x, y) chunk."""
-    def __init__(self, data_tensor: torch.Tensor, block_size: int, seed: int):
+    def __init__(self, task: str, L: int, tokenizer: CharTokenizer, block_size: int, seed: int):
         super().__init__()
-        self.data = data_tensor
+        self.task = task
+        self.L = L
+        self.tokenizer = tokenizer
         self.block_size = block_size
         self.seed = seed
+        self.pad_id = tokenizer.stoi['\n']
+        self.ignore_index = -100 # Standard PyTorch ignore index
 
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
         gen = torch.Generator()
         gen.manual_seed(self.seed + worker_info.id if worker_info else self.seed)
 
-        data_len = len(self.data)
         while True:
-            i = torch.randint(
-                low=0,
-                high=data_len - self.block_size - 1,
-                size=(1,),
-                generator=gen,
-            ).item()
-            x = self.data[i : i + self.block_size]
-            y = self.data[i + 1 : i + self.block_size + 1]
+            # 1. Generate text
+            prompt, _, text = _make_example(self.task, self.L, gen)
+            
+            # 2. Encode full text and prompt separately to find the split point
+            token_ids = self.tokenizer.encode(text)
+            prompt_len = len(self.tokenizer.encode(prompt))
+            
+            # 3. Handle Padding / Truncation
+            needed_len = self.block_size + 1
+            original_len = len(token_ids) # Store length before padding
+
+            if len(token_ids) > needed_len:
+                token_ids = token_ids[:needed_len]
+            
+            if len(token_ids) < needed_len:
+                padding = [self.pad_id] * (needed_len - len(token_ids))
+                token_ids = token_ids + padding
+
+            data = torch.tensor(token_ids, dtype=torch.long)
+            
+            # 4. Create x and y
+            x = data[:-1]
+            y = data[1:].clone() # Clone to modify safely
+
+            # 5. Apply Masking to y
+            y[:prompt_len - 1] = self.ignore_index
+
+            if original_len < needed_len:
+                y[original_len:] = self.ignore_index
+
             yield x, y
 
 
 class RandomChunkEval(Dataset):
-    """Finite-length dataset for validation to ensure eval finishes."""
-    def __init__(self, data_tensor: torch.Tensor, block_size: int, length: int):
+    def __init__(self, task: str, L: int, tokenizer: CharTokenizer, block_size: int, length: int, seed: int):
         super().__init__()
-        self.data = data_tensor
+        self.task = task
+        self.L = L
+        self.tokenizer = tokenizer
         self.block_size = block_size
         self.length = length
+        self.seed = seed
+        self.pad_id = tokenizer.stoi['\n']
+        self.ignore_index = -100
 
     def __len__(self):
         return self.length
 
     def __getitem__(self, idx):
-        i = torch.randint(
-            low=0,
-            high=len(self.data) - self.block_size - 1,
-            size=(1,),
-        ).item()
-        x = self.data[i : i + self.block_size]
-        y = self.data[i + 1 : i + self.block_size + 1]
-        return x, y
+        gen = torch.Generator()
+        gen.manual_seed(self.seed + idx)
+        
+        prompt, _, text = _make_example(self.task, self.L, gen)
+        token_ids = self.tokenizer.encode(text)
+        prompt_len = len(self.tokenizer.encode(prompt))
 
+        needed_len = self.block_size + 1
+        original_len = len(token_ids)
+        
+        if len(token_ids) > needed_len:
+            token_ids = token_ids[:needed_len]
+            
+        if len(token_ids) < needed_len:
+            padding = [self.pad_id] * (needed_len - len(token_ids))
+            token_ids = token_ids + padding
+
+        data = torch.tensor(token_ids, dtype=torch.long)
+        x = data[:-1]
+        y = data[1:].clone()
+
+        # Mask Prompt
+        y[:prompt_len - 1] = self.ignore_index
+        
+        # Mask Padding (keep first \n)
+        if original_len < needed_len:
+            y[original_len:] = self.ignore_index
+
+        return x, y
 
 def _build_tokenizer() -> CharTokenizer:
     # Minimal vocabulary: digits plus separators used by tasks
@@ -103,7 +151,7 @@ def _make_example(task: str, L: int, gen: torch.Generator) -> Tuple[str, str, st
         y = x if task == "copy" else x[::-1]
         prompt = f"{x}|"
         target = y
-        full = f"{x}|{y}\n"
+        full = f"{x}|{y}"
         return prompt, target, full
 
     # addition
@@ -113,7 +161,7 @@ def _make_example(task: str, L: int, gen: torch.Generator) -> Tuple[str, str, st
     c = f"{c_int:0{L+1}d}"  # fixed length L+1 (pads with leading zeros)
     prompt = f"{a}+{b}="
     target = c
-    full = f"{a}+{b}={c}\n"
+    full = f"{a}+{b}={c}"
     return prompt, target, full
 
 
@@ -135,28 +183,27 @@ def load_algorithmic_char(
     seed: int,
     train_seq_len: int = 40,
     val_seq_len: int = 40,
-    train_examples: int = 50000,
-    val_examples: int = 5000,
 ):
-    """
-    Produces random-chunk LM training data from synthetic algorithmic examples.
-
-    Note:
-      - train_seq_len/val_seq_len are the *digit lengths* L used in examples.
-      - To evaluate extrapolation (e.g. L=400) you should use a separate eval script.
-    """
     os.makedirs(data_dir, exist_ok=True)
     tokenizer = _build_tokenizer()
 
-    train_text = _build_corpus(task, train_seq_len, train_examples, seed=seed)
-    val_text = _build_corpus(task, val_seq_len, val_examples, seed=seed + 1)
-
-    train_data = torch.tensor(tokenizer.encode(train_text), dtype=torch.long)
-    val_data = torch.tensor(tokenizer.encode(val_text), dtype=torch.long)
-
-    train_ds = RandomChunkTrain(train_data, block_size=block_size, seed=seed)
+    train_ds = RandomChunkTrain(
+        task=task, 
+        L=train_seq_len, 
+        tokenizer=tokenizer, 
+        block_size=block_size, 
+        seed=seed
+    )
+    
     val_len = eval_iters * batch_size
-    val_ds = RandomChunkEval(val_data, block_size=block_size, length=val_len)
+    val_ds = RandomChunkEval(
+        task=task, 
+        L=val_seq_len, 
+        tokenizer=tokenizer, 
+        block_size=block_size, 
+        length=val_len,
+        seed=seed + 1
+    )
 
     num_workers = min(4, os.cpu_count() or 1)
     train_loader = DataLoader(

@@ -73,14 +73,52 @@ uv run python train.py \
 # Train TRM on addition task
 uv run python train.py \
   --model trm \
+<<<<<<< Updated upstream
   --dataset addition_char \
   --n-head 6 \
   --n-layer 6 \
   --block-size 256 \
   --algo-train-len 20 \
+=======
+  --gpu 0
+```
+
+## Experiments
+
+### Available Models
+
+| Model | Description | Block Passes |
+|-------|-------------|--------------|
+| `gpt` | GPT-2 baseline | `n_layer` |
+| `gpt_level1` | Shared block (reused n_layer times) | `n_layer` |
+| `gpt_level2` | + step embeddings | `n_layer` |
+| `ut` | Universal Transformer with ACT | `n_layer` |
+| `ut_level1` | + reasoning/solution decoupling | `2 * n_layer` |
+| `ut_level2` | + inner/outer loops | `n_layer * n_outer * (n_inner + 1)` |
+| `trm` | Full TRM | `n_layer * n_outer * (n_inner + 1)` |
+
+### Available Datasets
+
+- `addition_char` - Addition task (e.g., "123+456=")
+- `copy_char` - Copy task
+- `reverse_char` - Reverse task
+- `shakespeare_char` - Shakespeare text generation
+- `gsm8k_char` - GSM8K math problems
+
+### Multiple Evaluation Lengths
+
+Evaluate at multiple sequence lengths to measure extrapolation:
+
+```bash
+CUDA_VISIBLE_DEVICES=2
+uv python train.py \
+  --model trm \
+  --dataset reverse_char \
+  --algo-train-len 3 \
+>>>>>>> Stashed changes
   --dropout 0.1 \
   --gpu 0 \
-  --algo-eval-extrap-len 40
+  --algo-eval-extrap-len 3
 ```
 
 ## Managing Dependencies
