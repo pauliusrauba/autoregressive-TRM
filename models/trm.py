@@ -19,13 +19,18 @@ class TRM(BaseLitGPT):
         n_inner_loops: int = 2,
         n_outer_loops: int = 2,
         # NEW: Probability of forcing extra thinking steps
-        halt_exploration_prob: float = 0.25 
+        halt_exploration_prob: float = 0.25,
+        max_act_steps: int = None,
     ):
         super().__init__(vocab_size, block_size, n_embd, lr)
         self.save_hyperparameters()
 
+        # max_act_steps controls how many ACT steps the model can use
+        # If not specified, defaults to n_layer for backward compatibility
+        self.max_act_steps = max_act_steps if max_act_steps is not None else n_layer
+
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
-        self.step_embedding_table = nn.Embedding(n_layer, n_embd)
+        self.step_embedding_table = nn.Embedding(self.max_act_steps, n_embd)
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
         
         self.reasoning_param = nn.Parameter(torch.randn(n_embd) * 0.02)
@@ -37,7 +42,7 @@ class TRM(BaseLitGPT):
         with torch.no_grad():
             self.halt_head.bias.fill_(-3.0)
 
-        self.max_steps = n_layer
+        self.max_steps = self.max_act_steps
         self.halt_threshold = 0.5  # Standard sigmoid threshold
         self.act_epsilon = 0.01
 
@@ -73,9 +78,9 @@ class TRM(BaseLitGPT):
         output_accum = torch.zeros(B, T, self.hparams.n_embd, device=device)
         
         # To track randomized minimum steps for exploration
-        # (B, T) matrix of random integers between 1 and n_layer
+        # (B, T) matrix of random integers between 1 and max_act_steps
         if self.training and self.halt_exploration_prob > 0:
-            min_steps = torch.randint(1, self.hparams.n_layer, (B, T), device=device)
+            min_steps = torch.randint(1, self.max_act_steps, (B, T), device=device)
             do_explore = torch.rand((B, T), device=device) < self.halt_exploration_prob
             # If exploring, we enforce step >= min_steps
             # If not exploring, min_steps effectively 0
@@ -83,7 +88,7 @@ class TRM(BaseLitGPT):
         else:
             min_steps = torch.zeros((B, T), device=device)
 
-        for step in range(self.hparams.n_layer):
+        for step in range(self.max_act_steps):
             
             # --- NEW: Gradient Detachment (TBPTT) ---
             # We detach the state from the previous step.

@@ -8,19 +8,16 @@ __pycache__/
 # UV / Virtual environment
 .venv
 .venv/
-
 # Project artifacts
 checkpoints/
 wandb/
 lightning_logs/
 data/
-
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
-
 # Jupyter
 .ipynb_checkpoints/
 

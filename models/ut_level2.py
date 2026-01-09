@@ -17,13 +17,18 @@ class UTLevel2(BaseLitGPT):
         lr: float,
         ponder_cost_weight: float = 0.01,
         n_inner_loops: int = 4, # L: How many times to refine reasoning per solution step
-        n_outer_loops: int = 4 # H: How many times to update solution per ACT step
+        n_outer_loops: int = 4, # H: How many times to update solution per ACT step
+        max_act_steps: int = None,
     ):
         super().__init__(vocab_size, block_size, n_embd, lr)
         self.save_hyperparameters()
 
+        # max_act_steps controls how many ACT steps the model can use
+        # If not specified, defaults to n_layer for backward compatibility
+        self.max_act_steps = max_act_steps if max_act_steps is not None else n_layer
+
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
-        self.step_embedding_table = nn.Embedding(n_layer, n_embd)
+        self.step_embedding_table = nn.Embedding(self.max_act_steps, n_embd)
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
         
         # Change: Add a learnable reasoning parameter
@@ -37,8 +42,8 @@ class UTLevel2(BaseLitGPT):
         self.halt_head = nn.Linear(n_embd, 1)
 
         # Store ACT hyperparams
-        self.max_steps = n_layer
-        self.halt_threshold = 1.0 - 1e-6 # For numerical stabilitt
+        self.max_steps = self.max_act_steps
+        self.halt_threshold = 1.0 - 1e-6 # For numerical stability
         self.act_epsilon = 0.01 # for bias initialization
 
         self.ln_f = nn.LayerNorm(n_embd)
@@ -73,7 +78,7 @@ class UTLevel2(BaseLitGPT):
             output_accum = torch.zeros(B, T, self.hparams.n_embd, device=device)
 
             # --- The ACT Loop (Supervision Steps) ---
-            for step in range(self.hparams.n_layer):
+            for step in range(self.max_act_steps):
                 step_emb = self.step_embedding_table(torch.tensor(step, device=device))
                 
                 # Temporary holders for the recurrence engine
