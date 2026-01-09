@@ -3,7 +3,7 @@
 Universal Transformer Level 2: Hierarchical Recurrence.
 
 Delta from UT-Level1:
-  - Adds hierarchical HxL loop structure (nested fixed-point iteration)
+  - Adds hierarchical HL loop structure (nested fixed-point iteration)
   - Partial gradient detachment: only last H-cycle gets gradients
   
 The key insight: running multiple refinement cycles per ACT step
@@ -21,7 +21,7 @@ from models.common.trainer import BaseLitGPT
 from models.common.layers import Block
 from models.common.act import ACTController, ACTState
 from models.common.dual_stream import DualStreamState
-from models.common.recurrence import RecurrenceEngine
+from models.common.recurrence import RecurrenceEngine, RecurrenceEngineWithTBPTT
 
 
 class UTLevel2(BaseLitGPT):
@@ -59,7 +59,7 @@ class UTLevel2(BaseLitGPT):
         self.reasoning_param = nn.Parameter(torch.randn(n_embd) * 0.02)  # z_init
 
         # === NEW: Hierarchical recurrence engine ===
-        self.recurrence = RecurrenceEngine(
+        self.recurrence = RecurrenceEngineWithTBPTT(
             self.shared_block,
             n_inner_loops=n_inner_loops,
             n_outer_loops=n_outer_loops,
@@ -89,7 +89,7 @@ class UTLevel2(BaseLitGPT):
             stream = self.recurrence(stream, step_emb)
             
             act_state, all_halted = self.act.step(stream.solution, act_state, step)
-            if all_halted:
+            if all_halted and not self._force_full_compute:
                 break
 
         x, ponder_cost = self.act.finalize(stream.solution, act_state)

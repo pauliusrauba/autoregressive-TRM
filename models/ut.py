@@ -65,8 +65,8 @@ class UT(BaseLitGPT):
             step_emb = self.step_embedding_table(torch.tensor(step, device=device))
             x = self.shared_block(x + step_emb)
             
-            act_state, all_halted = self.act.step(x, act_state)
-            if all_halted:
+            act_state, all_halted = self.act.step(x, act_state, step)
+            if all_halted and not self._force_full_compute:
                 break
 
         x, ponder_cost = self.act.finalize(x, act_state)

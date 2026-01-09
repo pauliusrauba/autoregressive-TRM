@@ -80,7 +80,7 @@ class UTLevel1(BaseLitGPT):
             
             # ACT uses solution (y) state for halting decision
             act_state, all_halted = self.act.step(stream.solution, act_state, step)
-            if all_halted:
+            if all_halted and not self._force_full_compute:
                 break
 
         x, ponder_cost = self.act.finalize(stream.solution, act_state)

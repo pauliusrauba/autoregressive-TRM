@@ -7,11 +7,12 @@ composed with any recurrent transformer. The controller manages:
   - Halting probability accumulation
   - Weighted output accumulation  
   - Ponder cost computation
+  - Optional stochastic exploration (forces extra thinking steps)
 """
 import torch
 import torch.nn as nn
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Tuple, Optional
 
 
 @dataclass
@@ -22,15 +23,24 @@ class ACTState:
     remainders: torch.Tensor      # (B, T) - remainder for final step
     n_updates: torch.Tensor       # (B, T) - number of updates per position
     output_accum: torch.Tensor    # (B, T, C) - weighted state accumulator
+    min_steps: Optional[torch.Tensor] = None  # (B, T) - minimum steps for exploration
 
     @classmethod
-    def init(cls, B: int, T: int, C: int, device: torch.device) -> "ACTState":
+    def init(
+        cls, 
+        B: int, 
+        T: int, 
+        C: int, 
+        device: torch.device,
+        exploration_min_steps: Optional[torch.Tensor] = None,
+    ) -> "ACTState":
         return cls(
             halted=torch.zeros(B, T, dtype=torch.bool, device=device),
             halt_probs_accum=torch.zeros(B, T, device=device),
             remainders=torch.zeros(B, T, device=device),
             n_updates=torch.zeros(B, T, device=device),
             output_accum=torch.zeros(B, T, C, device=device),
+            min_steps=exploration_min_steps,
         )
 
 
@@ -44,7 +54,7 @@ class ACTController(nn.Module):
         
         for step in range(max_steps):
             x = block(x + step_emb)
-            state, should_stop = controller.step(x, state)
+            state, should_stop = controller.step(x, state, step)
             if should_stop:
                 break
         
@@ -60,6 +70,7 @@ class ACTController(nn.Module):
         self, 
         x: torch.Tensor,  # (B, T, C) - current state
         state: ACTState,
+        step: int = 0,  # current step index (for exploration)
     ) -> Tuple[ACTState, bool]:
         """
         Process one ACT step: compute halting, update accumulators.
@@ -67,6 +78,8 @@ class ACTController(nn.Module):
         Returns:
             Updated ACTState and bool indicating if all positions halted.
         """
+        device = x.device
+        
         # Compute halting probability
         halt_logits = self.halt_head(x).squeeze(-1)  # (B, T)
         halt_prob = torch.sigmoid(halt_logits)
@@ -74,7 +87,14 @@ class ACTController(nn.Module):
         still_running = ~state.halted
         
         # Check which positions will halt at this step
-        new_halted = (state.halt_probs_accum + halt_prob >= self.halt_threshold) & still_running
+        should_halt = (state.halt_probs_accum + halt_prob >= self.halt_threshold)
+        
+        # Apply exploration constraint if min_steps is set
+        if state.min_steps is not None:
+            forced_continue = (torch.tensor(step, device=device) < state.min_steps)
+            should_halt = should_halt & (~forced_continue)
+        
+        new_halted = should_halt & still_running
         
         # For newly halted positions, remainder = 1 - accumulated so far
         remainders = torch.where(
@@ -112,6 +132,7 @@ class ACTController(nn.Module):
             remainders=remainders,
             n_updates=n_updates,
             output_accum=output_accum,
+            min_steps=state.min_steps,
         )
         
         return new_state, halted.all().item()
@@ -138,3 +159,28 @@ class ACTController(nn.Module):
         ponder_cost = (state.n_updates + remainders).mean()
         
         return output, ponder_cost
+
+
+def create_exploration_min_steps(
+    B: int,
+    T: int,
+    max_act_steps: int,
+    exploration_prob: float,
+    device: torch.device,
+    training: bool,
+) -> Optional[torch.Tensor]:
+    """
+    Create min_steps tensor for stochastic halt exploration.
+    
+    During training, randomly forces some positions to think longer,
+    preventing premature halting collapse.
+    
+    Returns:
+        (B, T) tensor of minimum steps, or None if not training/no exploration
+    """
+    if not training or exploration_prob <= 0:
+        return None
+    
+    min_steps = torch.randint(1, max_act_steps, (B, T), device=device)
+    do_explore = torch.rand((B, T), device=device) < exploration_prob
+    return torch.where(do_explore, min_steps, torch.zeros_like(min_steps))

@@ -9,6 +9,9 @@ dependencies = [
     "pytorch-lightning>=2.0.0",
     "wandb>=0.15.0",
     "datasets>=4.4.1",
+    "jupyterlab>=4.5.1",
+    "notebook>=7.5.1",
+    "ipykernel>=7.1.0",
 ]
 
 [project.optional-dependencies]
