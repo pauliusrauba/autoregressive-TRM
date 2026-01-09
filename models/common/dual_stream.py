@@ -2,61 +2,70 @@
 """
 Dual-Stream state management for TRM transformers.
 
-This module isolates the solution/reasoning separation so it can be
-cleanly composed with any recurrent model. 
+The TRM decomposes state into three conceptually distinct streams:
+  - x: embedded input (static during recursion) - "the question"
+  - y: current solution/answer (evolves) - "the answer canvas"  
+  - z: latent reasoning state (evolves) - "scratch space for thinking"
 
-Delta from single-stream (UT):
-  - Splits state into 'solution' (answer) and 'reasoning'
-  - Two block calls per step: reasoning update, then solution update
+Update pattern (per step):
+  1. z' = block(x + y + z + step_emb)   # reasoning uses input
+  2. y' = block(y + z' + step_emb)      # answer does NOT use input
+
+This asymmetry is important: x appears in z-update but NOT y-update,
+so the model knows whether it's doing "reasoning" vs "answering".
 """
 import torch
 import torch.nn as nn
 from dataclasses import dataclass
-from typing import Tuple
 
 
 @dataclass
 class DualStreamState:
-    """Holds the two streams: solution and reasoning."""
-    solution: torch.Tensor   # (B, T, C) - the "answer" state
-    reasoning: torch.Tensor  # (B, T, C) - the "thinking" state
-    x_input: torch.Tensor    # (B, T, C) - static input (doesn't change across steps)
+    """
+    Holds the three streams: x (static), y (solution), z (reasoning).
+    
+    Attributes:
+        solution: (B, T, C) - y, the "answer" state (evolves)
+        reasoning: (B, T, C) - z, the "thinking" state (evolves)
+        x_input: (B, T, C) - x, static input (doesn't change across steps)
+    """
+    solution: torch.Tensor   # y - the answer being refined
+    reasoning: torch.Tensor  # z - the reasoning/thinking state
+    x_input: torch.Tensor    # x - static input (the question)
 
     @classmethod
     def init(
         cls, 
-        x_input: torch.Tensor,  # (B, T, C) - raw embeddings (tok + pos)
-        reasoning_param: nn.Parameter,  # (C,)
+        x_input: torch.Tensor,           # (B, T, C) - raw embeddings (tok + pos)
+        solution_param: nn.Parameter,    # (C,) - learned y_init
+        reasoning_param: nn.Parameter,   # (C,) - learned z_init
     ) -> "DualStreamState":
         """
-        Initialize dual-stream state from input embeddings.
+        Initialize dual-stream state with SEPARATE y and z initializations.
         
-        - x_input: kept unbiased (static reference to original input)
-        - solution: biased with reasoning_param (starting point for answer)
-        - reasoning: initialized to reasoning_param
+        - x_input: static reference to embedded input (the question)
+        - solution (y): starts from learned solution_param (answer canvas)
+        - reasoning (z): starts from learned reasoning_param (thinking init)
+        
+        Critically, y does NOT start as a copy of x. They are separate streams.
         """
         B, T, C = x_input.shape
-        reasoning_bias = reasoning_param.unsqueeze(0).unsqueeze(1)  # (1, 1, C)
         
         return cls(
-            solution=x_input + reasoning_bias,  # biased starting point
-            reasoning=reasoning_param.view(1, 1, -1).expand(B, T, -1).clone(),
-            x_input=x_input,  # UNBIASED - no reasoning_param here
+            solution=solution_param.view(1, 1, -1).expand(B, T, -1).clone(),   # y_init
+            reasoning=reasoning_param.view(1, 1, -1).expand(B, T, -1).clone(), # z_init
+            x_input=x_input,  # x (static, unmodified)
         )
 
 
 class DualStreamStep(nn.Module):
     """
-    Performs one dual-stream update step.
+    Performs one dual-stream update step following TRM paper.
     
-    The key insight: we separate "thinking" from "answering":
-      1. Reasoning update: z' = block(z + y + x + step_emb)
-      2. Solution update:  y' = block(y + z' + step_emb)
+    Update pattern:
+      1. z' = block(x + y + z + step_emb)   # reasoning conditioned on input
+      2. y' = block(y + z' + step_emb)      # answer NOT conditioned on input
     
-    Where:
-      - x = static input (question)
-      - y = solution (answer being refined)
-      - z = reasoning (scratch space for thinking)
     """
     
     def __init__(self, block: nn.Module):
@@ -73,14 +82,12 @@ class DualStreamStep(nn.Module):
         
         Returns new DualStreamState with updated solution and reasoning.
         """
-        # Step 1: Update reasoning conditioned on solution + input
-        cond_z = state.solution + state.x_input
-        u_z = state.reasoning + cond_z + step_emb
+        # Step 1: z-update - reasoning uses x, y, z
+        u_z = state.x_input + state.solution + state.reasoning + step_emb
         reasoning_new = self.block(u_z)
         
-        # Step 2: Update solution conditioned on new reasoning
-        cond_y = reasoning_new
-        u_y = state.solution + cond_y + step_emb
+        # Step 2: y-update - solution uses y, z' (NOT x!)
+        u_y = state.solution + reasoning_new + step_emb
         solution_new = self.block(u_y)
         
         return DualStreamState(
