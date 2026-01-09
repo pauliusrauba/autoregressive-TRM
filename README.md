@@ -101,10 +101,12 @@ python train.py \
 ```
 
 # Train TRM on addition task
+```
 uv run python train.py \
   --model trm \
   --gpu 0
 ```
+
 
 ## Experiments
 
@@ -133,13 +135,14 @@ uv run python train.py \
 Evaluate at multiple sequence lengths to measure extrapolation:
 
 ```bash
-python train.py \
+CUDA_VISIBLE_DEVICES=2
+uv python train.py \
   --model trm \
-  --dataset addition_char \
-  --algo-train-len 20 \
+  --dataset reverse_char \
+  --algo-train-len 3 \
   --dropout 0.1 \
   --gpu 0 \
-  --algo-eval-extrap-len 40
+  --algo-eval-extrap-len 3
 ```
 
 ## Managing Dependencies

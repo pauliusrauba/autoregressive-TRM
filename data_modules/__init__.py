@@ -16,8 +16,6 @@ def load_dataset(
     seed: int,
     algo_train_len: Optional[int] = None,
     algo_val_len: Optional[int] = None,
-    algo_train_examples: Optional[int] = None,
-    algo_val_examples: Optional[int] = None,
 ):
     name = name.lower()
     if name == "shakespeare_char":
@@ -51,8 +49,6 @@ def load_dataset(
                 seed=seed,
                 train_seq_len=algo_train_len if algo_train_len is not None else 40,
                 val_seq_len=algo_val_len if algo_val_len is not None else 40,
-                train_examples=algo_train_examples if algo_train_examples is not None else 50000,
-                val_examples=algo_val_examples if algo_val_examples is not None else 5000,
             )
             return train_loader, val_loader, tokenizer, tokenizer.vocab_size
 
@@ -65,8 +61,6 @@ def load_dataset(
             seed=seed,
             train_seq_len=algo_train_len if algo_train_len is not None else 40,
             val_seq_len=algo_val_len if algo_val_len is not None else 40,
-            train_examples=algo_train_examples if algo_train_examples is not None else 50000,
-            val_examples=algo_val_examples if algo_val_examples is not None else 5000,
         )
         return train_loader, val_loader, tokenizer, tokenizer.vocab_size
 
@@ -79,8 +73,6 @@ def load_dataset(
             seed=seed,
             train_seq_len=algo_train_len if algo_train_len is not None else 40,
             val_seq_len=algo_val_len if algo_val_len is not None else 40,
-            train_examples=algo_train_examples if algo_train_examples is not None else 50000,
-            val_examples=algo_val_examples if algo_val_examples is not None else 5000,
         )
         return train_loader, val_loader, tokenizer, tokenizer.vocab_size
 
