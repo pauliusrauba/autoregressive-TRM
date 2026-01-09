@@ -3,11 +3,14 @@
 Universal Transformer Level 1: Dual-Stream Reasoning.
 
 Delta from UT:
-  - Adds dual-stream state (solution + reasoning)
+  - Adds dual-stream state: y (solution) and z (reasoning)
   - Two block calls per step instead of one
+  - Separate learned initializations for y and z
   
-The key insight: separating "thinking" from "answering" may help
-the model develop better intermediate representations.
+The key insight: separating "thinking" (z) from "answering" (y)
+with distinct update rules:
+  - z' = block(x + y + z + step)   # reasoning uses input
+  - y' = block(y + z' + step)      # answer does NOT use input
 """
 import torch
 import torch.nn as nn
@@ -46,8 +49,10 @@ class UTLevel1(BaseLitGPT):
         self.n_layer = n_layer
         self.act = ACTController(n_embd)
 
-        # === NEW: Dual-stream components ===
-        self.reasoning_param = nn.Parameter(torch.randn(n_embd) * 0.02)
+        # === NEW: Separate y_init and z_init (TRM paper requirement) ===
+        self.solution_param = nn.Parameter(torch.randn(n_embd) * 0.02)   # y_init
+        self.reasoning_param = nn.Parameter(torch.randn(n_embd) * 0.02)  # z_init
+        
         self.dual_step = DualStreamStep(self.shared_block)
 
         self.apply(self._init_weights)
@@ -57,23 +62,23 @@ class UTLevel1(BaseLitGPT):
         device = idx.device
         assert T <= self.hparams.block_size
 
-        # Embeddings
+        # Embeddings: x = tok + pos (static input)
         tok_emb = self.token_embedding_table(idx)
         pos_emb = self.position_embedding_table(torch.arange(T, device=device))
         x_input = tok_emb + pos_emb
 
-        # === NEW: Initialize dual-stream state ===
-        stream = DualStreamState.init(x_input, self.reasoning_param)
+        # === NEW: Initialize with SEPARATE y and z ===
+        stream = DualStreamState.init(x_input, self.solution_param, self.reasoning_param)
         
         act_state = ACTState.init(B, T, self.hparams.n_embd, device)
 
         for step in range(self.max_act_steps):
             step_emb = self.step_embedding_table(torch.tensor(step, device=device))
             
-            # === NEW: Dual-stream update (replaces single block call) ===
+            # Dual-stream update: z' = f(x,y,z), then y' = f(y,z')
             stream = self.dual_step(stream, step_emb)
             
-            # ACT uses solution state for halting decision
+            # ACT uses solution (y) state for halting decision
             act_state, all_halted = self.act.step(stream.solution, act_state, step)
             if all_halted:
                 break
