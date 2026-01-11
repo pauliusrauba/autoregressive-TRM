@@ -82,7 +82,7 @@ class ACTController(nn.Module):
         
         # Compute halting probability
         halt_logits = self.halt_head(x).squeeze(-1)  # (B, T)
-        halt_prob = torch.sigmoid(halt_logits)
+        halt_prob = torch.sigmoid(halt_logits) # (B, T)
         
         still_running = ~state.halted
         
