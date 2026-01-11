@@ -118,8 +118,6 @@ def parse_args():
     # Algorithmic dataset args
     parser.add_argument("--algo-train-len", type=int, default=40)
     parser.add_argument("--algo-val-len", type=int, default=40)
-    parser.add_argument("--algo-train-examples", type=int, default=50000)
-    parser.add_argument("--algo-val-examples", type=int, default=5000)
 
     # Algorithmic eval callback args
     parser.add_argument(
@@ -155,8 +153,6 @@ def main():
         seed=args.seed,
         algo_train_len=args.algo_train_len,
         algo_val_len=args.algo_val_len,
-        algo_train_examples=args.algo_train_examples,
-        algo_val_examples=args.algo_val_examples,
     )
 
     # 2) Model
