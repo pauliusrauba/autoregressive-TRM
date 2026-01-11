@@ -22,7 +22,7 @@ model_registry = {
     "ut": UT,
     "ut_level1": UTLevel1,
     "ut_level2": UTLevel2,
-    "trm": TRM
+    "trm": TRM,
 }
 
 def build_model(name: str, **kwargs):

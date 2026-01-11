@@ -10,6 +10,18 @@ class BaseLitGPT(pl.LightningModule):
         # We save all arguments (even those passed to children)
         self.save_hyperparameters()
         
+        # Flag to force full compute (no early halting) - useful for controlled experiments
+        self._force_full_compute = False
+    
+    def set_full_compute(self, force: bool = True):
+        """Enable/disable forced full compute (no early halting).
+        
+        When True, adaptive models (UT, TRM, etc.) will always run max_act_steps.
+        When False (default), models use their natural halting behavior.
+        """
+        self._force_full_compute = force
+        return self  # Allow chaining
+        
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
             nn.init.normal_(module.weight, mean=0.0, std=0.02)
