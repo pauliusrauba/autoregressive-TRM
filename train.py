@@ -31,37 +31,6 @@ def parse_args():
     parser.add_argument("--dropout", type=float, default=0.2)
     parser.add_argument("--lr", type=float, default=3e-4)
 
-    # Unified GPT/UT levels (only used if args.model == "unified_gpt_ut")
-    parser.add_argument(
-        "--level",
-        type=int,
-        default=0,
-        help="Unified GPT/UT level: 0=GPT, 1=recurrent, 2=+learned step, 3=+sinusoidal 2D, 4=UT step, 5=+ACT, 6=+ponder",
-    )
-    parser.add_argument(
-        "--num-steps",
-        type=int,
-        default=None,
-        help="Number of recurrent refinement steps for levels 1-4. Defaults to n_layer if omitted.",
-    )
-    parser.add_argument(
-        "--ut-max-steps",
-        type=int,
-        default=16,
-        help="Max steps for learned step embeddings (level 2) and ACT loop (levels 5-6).",
-    )
-    parser.add_argument(
-        "--act-threshold",
-        type=float,
-        default=0.99,
-        help="ACT halting threshold (levels 5-6).",
-    )
-    parser.add_argument(
-        "--act-loss-weight",
-        type=float,
-        default=0.01,
-        help="Ponder cost coefficient (level 6).",
-    )
     parser.add_argument(
         "--gpu",
         type=int,
@@ -196,17 +165,16 @@ def main():
     if args.ponder_cost_weight is not None:
         print(f"Ponder Cost Weight: {args.ponder_cost_weight}")
 
-# Weights & Biases logger
+    # Weights & Biases logger
+    run_name = args.run_name if args.run_name else f"{args.model}_{args.dataset}_train_{args.algo_train_len}_compute_{args.compute_budget}"
     wandb_logger = WandbLogger(
         project="icml-recursive-llms",
-        name = args.run_name if args.run_name is not None else f"{args.model}-{args.dataset}-train-{args.algo_train_len}-compute-{args.compute_budget}",
+        name=run_name,
         config=vars(args),
     )
 
     # 3) Checkpointing
-    data_dir = "/mnt/pdata/pr501/icml2025"
-    run_name = args.run_name if args.run_name else f"{args.model}_{args.dataset}"
-    ckpt_dir = os.path.join(data_dir, "checkpoints", run_name)
+    ckpt_dir = os.path.join(args.data_dir, "checkpoints", run_name)
     os.makedirs(ckpt_dir, exist_ok=True)
 
     # Checkpoint every 2000 steps
