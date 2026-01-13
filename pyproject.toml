@@ -12,6 +12,8 @@ dependencies = [
     "jupyterlab>=4.5.1",
     "notebook>=7.5.1",
     "ipykernel>=7.1.0",
+    "matplotlib>=3.10.8",
+    "seaborn>=0.13.2",
 ]
 
 [project.optional-dependencies]

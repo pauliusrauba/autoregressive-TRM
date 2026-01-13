@@ -145,6 +145,7 @@ class AlgorithmicEvalCallback(pl.Callback):
     - first_char_acc, last_char_acc: First/last position accuracy
     - pos_q1/q2/q3/q4_acc: Quartile position accuracy
     - model/param_count: Total model parameters (logged once)
+    - training/tokens_seen: Cumulative tokens processed (logged every step)
     """
 
     def __init__(
@@ -158,6 +159,8 @@ class AlgorithmicEvalCallback(pl.Callback):
         self.seed = seed
         self.log_on_steps = log_on_steps
         self._logged_params = False
+        self._param_count = None
+        self._param_count_M = None
 
     def on_validation_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         # Avoid running on sanity check
@@ -169,12 +172,19 @@ class AlgorithmicEvalCallback(pl.Callback):
 
         metrics: Dict[str, float] = {}
         
-        # Log parameter count once
+        # Log parameter count (cache it for repeated logging)
         if not self._logged_params:
-            total_params = sum(p.numel() for p in pl_module.parameters())
-            metrics["model/param_count"] = total_params
-            metrics["model/param_count_M"] = total_params / 1e6
+            self._param_count = sum(p.numel() for p in pl_module.parameters())
+            self._param_count_M = self._param_count / 1e6
             self._logged_params = True
+        
+        # Always log param count so it appears in every history row
+        metrics["model/param_count"] = self._param_count
+        metrics["model/param_count_M"] = self._param_count_M
+        
+        # Log training step for FLOPs reconstruction
+        # (tokens_seen computed in plotting script from step * batch_size * block_size via run.config)
+        metrics["training/step"] = step
         
         # Evaluate at each length
         for spec in self.specs:

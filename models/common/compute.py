@@ -126,6 +126,8 @@ def adjust_params_for_compute_budget(
         # Simple: n_layer = target_block_passes
         result['n_layer'] = target_block_passes
         
+    # For UT level 1, Level2, and TRM, there are multiple forward passes per layer and therefore
+    # We need to detach "parameters', 'layers', and 'compute budget'.
     elif model_name == "ut_level1":
         # 2 passes per step, so n_layer = target / 2
         result['n_layer'] = max(1, target_block_passes // 2)
