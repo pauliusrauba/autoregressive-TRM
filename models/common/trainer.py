@@ -12,6 +12,9 @@ class BaseLitGPT(pl.LightningModule):
         
         # Flag to force full compute (no early halting) - useful for controlled experiments
         self._force_full_compute = False
+        
+        # Inference-time compute scaling: allows extrapolating beyond trained steps
+        self._inference_steps = None  # None means use training steps (n_layer or max_act_steps)
     
     def set_full_compute(self, force: bool = True):
         """Enable/disable forced full compute (no early halting).
@@ -21,6 +24,36 @@ class BaseLitGPT(pl.LightningModule):
         """
         self._force_full_compute = force
         return self  # Allow chaining
+    
+    def set_inference_steps(self, steps: int = None):
+        """Set the number of iteration steps to use at inference time.
+        
+        This enables compute extrapolation: using more (or fewer) steps at inference
+        than the model was trained with.
+        
+        Args:
+            steps: Number of steps to use. If None, uses training steps (n_layer or max_act_steps).
+                   Can be larger than trained steps for compute extrapolation.
+        
+        Note:
+            - For models with step embeddings, extra steps will reuse the last embedding.
+            - For models without step embeddings (or with use_step_embeddings=False),
+              extrapolation is clean with no clamping needed.
+            - For ACT models, you may also want set_full_compute(True) to prevent early halting.
+        """
+        self._inference_steps = steps
+        return self  # Allow chaining
+    
+    def get_inference_steps(self, default_steps: int) -> int:
+        """Get the number of steps to use for inference.
+        
+        Args:
+            default_steps: The default (training) number of steps.
+        
+        Returns:
+            The number of steps to use (either _inference_steps if set, or default).
+        """
+        return self._inference_steps if self._inference_steps is not None else default_steps
         
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):

@@ -13,6 +13,11 @@ detaching H-1 cycles saves memory without losing expressiveness.
 Update pattern (TRM paper):
   - z' = block(x + y + z + step)   # reasoning uses input
   - y' = block(y + z' + step)      # answer does NOT use input
+
+Supports:
+  - use_step_embeddings: Set to False to disable step embeddings (enables clean extrapolation)
+  - set_inference_steps(): Run more/fewer steps at inference than training
+  - set_full_compute(): Force all steps without early halting
 """
 import torch
 import torch.nn as nn
@@ -38,15 +43,16 @@ class UTLevel2(BaseLitGPT):
         n_inner_loops: int = 4,   # L: reasoning refinements per H-cycle
         n_outer_loops: int = 4,   # H: solution update cycles per ACT step
         max_act_steps: int = None,
+        use_step_embeddings: bool = True,
     ):
         super().__init__(vocab_size, block_size, n_embd, lr)
         self.save_hyperparameters()
 
         self.max_act_steps = max_act_steps if max_act_steps is not None else n_layer
+        self._trained_max_steps = self.max_act_steps  # Remember for clamping during extrapolation
 
         # === Same as UT-Level1 ===
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
-        self.step_embedding_table = nn.Embedding(self.max_act_steps, n_embd)
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
         self.shared_block = Block(n_embd, n_head, block_size, dropout)
         self.ln_f = nn.LayerNorm(n_embd)
@@ -54,11 +60,16 @@ class UTLevel2(BaseLitGPT):
         self.n_layer = n_layer
         self.act = ACTController(n_embd)
         
+        # Step embeddings (optional - disable for clean compute extrapolation)
+        self.use_step_embeddings = use_step_embeddings
+        if use_step_embeddings:
+            self.step_embedding_table = nn.Embedding(self.max_act_steps, n_embd)
+        
         # Separate y_init and z_init (TRM paper requirement)
         self.solution_param = nn.Parameter(torch.randn(n_embd) * 0.02)   # y_init
         self.reasoning_param = nn.Parameter(torch.randn(n_embd) * 0.02)  # z_init
 
-        # === NEW: Hierarchical recurrence engine ===
+        # === Hierarchical recurrence engine ===
         self.recurrence = RecurrenceEngineWithTBPTT(
             self.shared_block,
             n_inner_loops=n_inner_loops,
@@ -82,8 +93,17 @@ class UTLevel2(BaseLitGPT):
         
         act_state = ACTState.init(B, T, self.hparams.n_embd, device)
 
-        for step in range(self.max_act_steps):
-            step_emb = self.step_embedding_table(torch.tensor(step, device=device))
+        # Get number of steps (allows inference-time extrapolation)
+        num_steps = self.get_inference_steps(self.max_act_steps)
+
+        for step in range(num_steps):
+            if self.use_step_embeddings and hasattr(self, 'step_embedding_table'):
+                # Clamp step index for extrapolation (reuse last embedding for extra steps)
+                step_idx = min(step, self._trained_max_steps - 1)
+                step_emb = self.step_embedding_table(torch.tensor(step_idx, device=device))
+            else:
+                # No step embeddings - enables clean compute extrapolation
+                step_emb = None
             
             # H×L recurrence with partial gradient detachment
             stream = self.recurrence(stream, step_emb)

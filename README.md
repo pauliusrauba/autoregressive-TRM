@@ -234,3 +234,14 @@ Results logged to W&B project: `icml-recursive-llms`
 Analysis notebooks in `notebooks/`:
 - `1. Exploration.ipynb`
 - `2. Results.ipynb`
+
+
+---
+
+ADded step embedding flag
+
+# Mode A: With step embeddings (current behavior)
+python train.py --model ut_level2 --compute-budget 12 --use-step-embeddings
+
+# Mode B: Without step embeddings (new option)  
+python train.py --model ut_level2 --compute-budget 12 --no-step-embeddings

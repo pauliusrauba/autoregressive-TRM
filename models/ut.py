@@ -6,7 +6,10 @@ Delta from GPT-Level2:
   - Adds ACT (adaptive halting) via ACTController
   - Adds ponder_cost to loss
   
-Everything else (weight tying, step embedding) is inherited from GPT-Level2 structure.
+Supports:
+  - use_step_embeddings: Set to False to disable step embeddings (enables clean extrapolation)
+  - set_inference_steps(): Run more/fewer steps at inference than training
+  - set_full_compute(): Force all steps without early halting
 """
 import torch
 import torch.nn as nn
@@ -28,22 +31,28 @@ class UT(BaseLitGPT):
         lr: float,
         ponder_cost_weight: float = 0.01,
         max_act_steps: int = None,
+        use_step_embeddings: bool = True,
     ):
         super().__init__(vocab_size, block_size, n_embd, lr)
         self.save_hyperparameters()
 
         self.max_act_steps = max_act_steps if max_act_steps is not None else n_layer
+        self._trained_max_steps = self.max_act_steps  # Remember for clamping during extrapolation
 
         # === Same as GPT-Level2 ===
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
-        self.step_embedding_table = nn.Embedding(self.max_act_steps, n_embd)
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
         self.shared_block = Block(n_embd, n_head, block_size, dropout)
         self.ln_f = nn.LayerNorm(n_embd)
         self.lm_head = nn.Linear(n_embd, vocab_size)
         self.n_layer = n_layer
 
-        # === NEW: ACT Controller ===
+        # Step embeddings (optional - disable for clean compute extrapolation)
+        self.use_step_embeddings = use_step_embeddings
+        if use_step_embeddings:
+            self.step_embedding_table = nn.Embedding(self.max_act_steps, n_embd)
+
+        # === ACT Controller ===
         self.act = ACTController(n_embd)
 
         self.apply(self._init_weights)
@@ -58,12 +67,21 @@ class UT(BaseLitGPT):
         pos_emb = self.position_embedding_table(torch.arange(T, device=device))
         x = tok_emb + pos_emb
 
-        # === NEW: ACT loop (replaces fixed-depth loop) ===
+        # Get number of steps (allows inference-time extrapolation)
+        num_steps = self.get_inference_steps(self.max_act_steps)
+
+        # === ACT loop ===
         act_state = ACTState.init(B, T, self.hparams.n_embd, device)
         
-        for step in range(self.max_act_steps):
-            step_emb = self.step_embedding_table(torch.tensor(step, device=device))
-            x = self.shared_block(x + step_emb)
+        for step in range(num_steps):
+            if self.use_step_embeddings and hasattr(self, 'step_embedding_table'):
+                # Clamp step index for extrapolation (reuse last embedding for extra steps)
+                step_idx = min(step, self._trained_max_steps - 1)
+                step_emb = self.step_embedding_table(torch.tensor(step_idx, device=device))
+                x = self.shared_block(x + step_emb)
+            else:
+                # No step embeddings - pure iteration
+                x = self.shared_block(x)
             
             act_state, all_halted = self.act.step(x, act_state, step)
             if all_halted and not self._force_full_compute:
@@ -80,7 +98,6 @@ class UT(BaseLitGPT):
         if targets is not None:
             B, T, C = logits.shape
             ce_loss = F.cross_entropy(logits.view(B * T, C), targets.view(B * T))
-            # NEW: Add ponder cost to loss
             loss = ce_loss + self.hparams.ponder_cost_weight * ponder_cost
 
         return logits, loss

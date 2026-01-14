@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# exp v2
 # experiments/exp_param_inference_scaling.sh
 # Parameter and inference compute scaling experiments for four plots:
 #   Plot 1: Parameter-performance frontier (best over inference compute)
@@ -37,8 +38,8 @@ DROPOUT=0.1
 N_LAYER=6             # Base n_layer (adjusted by compute normalization)
 
 # Loop settings for UTLevel2/TRM
-N_INNER_LOOPS=2
-N_OUTER_LOOPS=2
+# NOTE: These are now computed dynamically by the compute normalization
+# to achieve the exact target compute budget.
 
 # Training settings (reduced for 6-hour budget)
 MAX_STEPS=4000
@@ -150,12 +151,8 @@ run_experiment() {
             ;;
     esac
     
-    # Add loop parameters for models that use them
-    case "$model" in
-        ut_level2|trm)
-            cmd="${cmd} --n-inner-loops ${N_INNER_LOOPS} --n-outer-loops ${N_OUTER_LOOPS}"
-            ;;
-    esac
+    # NOTE: Loop parameters for ut_level2/trm are computed dynamically by
+    # the compute normalization to achieve the exact target compute budget.
     
     # Run in background
     eval "${cmd}" > "${log_file}" 2>&1 &

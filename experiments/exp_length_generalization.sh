@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# exp v1
 # experiments/exp_length_generalization.sh
 # Length generalization experiments for the four plots:
 #   Plot 1: Absolute-length generalization at fixed inference compute
@@ -30,9 +31,9 @@ BLOCK_SIZE=180  # Max sequence: addition L=50 = 153 tokens, +27 buffer
 DROPOUT=0.1
 N_LAYER=6  # Base n_layer (adjusted by compute normalization)
 
-# Loop settings for UTLevel2/TRM (kept fixed for compute normalization)
-N_INNER_LOOPS=2
-N_OUTER_LOOPS=2
+# Loop settings for UTLevel2/TRM
+# NOTE: These are now computed dynamically by the compute normalization
+# to achieve the exact target compute budget.
 
 # Training settings
 MAX_STEPS=5000
@@ -138,12 +139,8 @@ run_experiment() {
             ;;
     esac
     
-    # Add loop parameters for models that use them
-    case "$model" in
-        ut_level2|trm)
-            cmd="${cmd} --n-inner-loops ${N_INNER_LOOPS} --n-outer-loops ${N_OUTER_LOOPS}"
-            ;;
-    esac
+    # NOTE: Loop parameters for ut_level2/trm are computed dynamically by
+    # the compute normalization to achieve the exact target compute budget.
     
     # Run in background, redirect output to log file
     eval "${cmd}" > "${log_file}" 2>&1 &

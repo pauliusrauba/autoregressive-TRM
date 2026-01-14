@@ -76,6 +76,15 @@ def parse_args():
         help="Weight for ponder cost in ACT loss. Set to 0 to disable ponder penalty. "
              "If not specified, uses model default (0.01).",
     )
+    
+    # Compute extrapolation parameters
+    parser.add_argument(
+        "--no-step-embeddings",
+        action="store_true",
+        help="Disable step embeddings for models that use them (GPT-Level2, UT, UT-Level1, UT-Level2, TRM). "
+             "This enables clean compute extrapolation at inference time - you can run more iterations "
+             "than trained without any embedding lookup issues. Use set_inference_steps() at eval time.",
+    )
 
     # Training hyperparameters
     parser.add_argument("--batch-size", type=int, default=64)
@@ -83,6 +92,12 @@ def parse_args():
     parser.add_argument("--eval-interval", type=int, default=500)
     parser.add_argument("--eval-iters", type=int, default=200)
     parser.add_argument("--seed", type=int, default=1337)
+    parser.add_argument(
+        "--checkpoint-interval",
+        type=int,
+        default=None,
+        help="Save checkpoint every N steps. If not specified, defaults to max_steps/10 for ~10 checkpoints.",
+    )
 
     # Algorithmic dataset args
     parser.add_argument("--algo-train-len", type=int, default=40)
@@ -146,6 +161,10 @@ def main():
         model_kwargs['max_act_steps'] = args.max_act_steps
     if args.ponder_cost_weight is not None:
         model_kwargs['ponder_cost_weight'] = args.ponder_cost_weight
+    
+    # Add step embedding control for compute extrapolation experiments
+    if args.no_step_embeddings:
+        model_kwargs['use_step_embeddings'] = False
 
     # Apply compute budget normalization if specified
     model_kwargs, compute_summary = normalize_model_kwargs_for_compute(
@@ -164,6 +183,8 @@ def main():
         print(f"Max ACT Steps: {args.max_act_steps}")
     if args.ponder_cost_weight is not None:
         print(f"Ponder Cost Weight: {args.ponder_cost_weight}")
+    if args.no_step_embeddings:
+        print(f"Step Embeddings: DISABLED (clean compute extrapolation enabled)")
 
     # Weights & Biases logger
     run_name = args.run_name if args.run_name else f"{args.model}_{args.dataset}_train_{args.algo_train_len}_compute_{args.compute_budget}"
@@ -177,11 +198,15 @@ def main():
     ckpt_dir = os.path.join(args.data_dir, "checkpoints", run_name)
     os.makedirs(ckpt_dir, exist_ok=True)
 
-    # Checkpoint every 2000 steps
+    # Determine checkpoint interval (default: ~10 checkpoints per run)
+    checkpoint_interval = args.checkpoint_interval
+    if checkpoint_interval is None:
+        checkpoint_interval = max(1, args.max_steps // 10)
+    
     periodic_checkpoint_cb = ModelCheckpoint(
         dirpath=ckpt_dir,
         filename="step={step:05d}",
-        every_n_train_steps=2000,
+        every_n_train_steps=checkpoint_interval,
         save_top_k=-1,  # Keep all periodic checkpoints
     )
 

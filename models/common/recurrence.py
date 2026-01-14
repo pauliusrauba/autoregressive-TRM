@@ -11,6 +11,9 @@ gradient detachment. It implements the TRM update pattern:
 Delta from flat iteration (UT-Level1):
   - Nested loops: L inner iterations (reasoning), H outer iterations (solution)
   - Partial gradient detachment: only last H-cycle gets gradients
+
+Supports:
+  - Optional step_emb: Pass None to disable step embeddings (enables clean extrapolation)
 """
 import torch
 import torch.nn as nn
@@ -46,7 +49,7 @@ class RecurrenceEngine(nn.Module):
     def _one_h_cycle(
         self,
         state: DualStreamState,
-        step_emb: torch.Tensor,
+        step_emb: torch.Tensor = None,
     ) -> DualStreamState:
         """
         Run one H-cycle: L reasoning updates + 1 solution update.
@@ -54,11 +57,17 @@ class RecurrenceEngine(nn.Module):
         Update pattern (TRM paper):
           - z-update: z' = block(x + y + z + step)  # uses x
           - y-update: y' = block(y + z' + step)     # does NOT use x
+        
+        Args:
+            state: Current dual-stream state
+            step_emb: Optional step embedding. If None, no step info is added.
         """
         # L inner loops: refine reasoning (z-updates)
         # Each z-update uses x, y, z
         for l in range(self.n_inner_loops):
-            u_z = state.x_input + state.solution + state.reasoning + step_emb
+            u_z = state.x_input + state.solution + state.reasoning
+            if step_emb is not None:
+                u_z = u_z + step_emb
             state = DualStreamState(
                 solution=state.solution,      # y unchanged during z-updates
                 reasoning=self.block(u_z),    # z updates
@@ -67,7 +76,9 @@ class RecurrenceEngine(nn.Module):
         
         # 1 solution update (y-update)
         # y-update uses y, z (not x)
-        u_y = state.solution + state.reasoning + step_emb
+        u_y = state.solution + state.reasoning
+        if step_emb is not None:
+            u_y = u_y + step_emb
         state = DualStreamState(
             solution=self.block(u_y),
             reasoning=state.reasoning,
@@ -79,13 +90,17 @@ class RecurrenceEngine(nn.Module):
     def forward(
         self,
         state: DualStreamState,
-        step_emb: torch.Tensor,
+        step_emb: torch.Tensor = None,
     ) -> DualStreamState:
         """
         Run full H×L recurrence with partial gradient detachment.
         
         - First H-1 cycles: no gradients (fixed-point settling)
         - Last cycle: gradients enabled (optimization step)
+        
+        Args:
+            state: Current dual-stream state
+            step_emb: Optional step embedding. If None, no step info is added (enables extrapolation).
         """
         # Phase 1: H-1 cycles without gradients
         with torch.no_grad():
@@ -110,11 +125,16 @@ class RecurrenceEngineWithTBPTT(RecurrenceEngine):
     def forward(
         self,
         state: DualStreamState,
-        step_emb: torch.Tensor,
-        detach_input: bool = True,  # NEW: control TBPTT
+        step_emb: torch.Tensor = None,
+        detach_input: bool = True,
     ) -> DualStreamState:
         """
         Run recurrence with optional input detachment (TBPTT).
+        
+        Args:
+            state: Current dual-stream state
+            step_emb: Optional step embedding. If None, no step info is added (enables extrapolation).
+            detach_input: Whether to detach state at start (TBPTT)
         """
         if detach_input:
             state = DualStreamState(

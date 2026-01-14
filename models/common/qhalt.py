@@ -71,6 +71,10 @@ def create_exploration_min_steps_batch(
     if not training or exploration_prob <= 0:
         return torch.zeros(B, device=device, dtype=torch.long)
     
+    # Handle edge case where max_steps is too small for exploration
+    if max_steps < 2:
+        return torch.zeros(B, device=device, dtype=torch.long)
+    
     do_explore = torch.rand(B, device=device) < exploration_prob
-    min_steps = torch.randint(2, max_steps + 1, (B,), device=device)
+    min_steps = torch.randint(1, max_steps + 1, (B,), device=device)
     return torch.where(do_explore, min_steps, torch.zeros_like(min_steps))

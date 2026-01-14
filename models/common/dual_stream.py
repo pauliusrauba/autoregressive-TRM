@@ -75,19 +75,27 @@ class DualStreamStep(nn.Module):
     def forward(
         self,
         state: DualStreamState,
-        step_emb: torch.Tensor,  # (C,) step embedding
+        step_emb: torch.Tensor = None,  # (C,) step embedding, optional for clean extrapolation
     ) -> DualStreamState:
         """
         One step of dual-stream refinement.
         
+        Args:
+            state: Current dual-stream state
+            step_emb: Optional step embedding. If None, no step info is added (enables extrapolation).
+        
         Returns new DualStreamState with updated solution and reasoning.
         """
         # Step 1: z-update - reasoning uses x, y, z
-        u_z = state.x_input + state.solution + state.reasoning + step_emb
+        u_z = state.x_input + state.solution + state.reasoning
+        if step_emb is not None:
+            u_z = u_z + step_emb
         reasoning_new = self.block(u_z)
         
         # Step 2: y-update - solution uses y, z' (NOT x!)
-        u_y = state.solution + reasoning_new + step_emb
+        u_y = state.solution + reasoning_new
+        if step_emb is not None:
+            u_y = u_y + step_emb
         solution_new = self.block(u_y)
         
         return DualStreamState(

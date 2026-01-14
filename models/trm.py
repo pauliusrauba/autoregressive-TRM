@@ -7,6 +7,11 @@ Delta from UT-Level2:
   - No weighted accumulation, no ponder cost
   - Halts at both train and eval time (unlike original paper which used fixed eval)
   - Use set_full_compute(True) to force max_act_steps (no halting)
+
+Supports:
+  - use_step_embeddings: Set to False to disable step embeddings (enables clean extrapolation)
+  - set_inference_steps(): Run more/fewer steps at inference than training
+  - set_full_compute(): Force all steps without early halting
 """
 import torch
 import torch.nn.functional as F
@@ -37,20 +42,30 @@ class TRM(UTLevel2):
         from models.common.dual_stream import DualStreamState
         stream = DualStreamState.init(x_input, self.solution_param, self.reasoning_param)
         
+        # Get number of steps (allows inference-time extrapolation)
+        num_steps = self.get_inference_steps(self.max_act_steps)
+        
         # Exploration only during training
         min_steps = create_exploration_min_steps_batch(
-            B, self.max_act_steps, self.halt_exploration_prob, device, self.training
+            B, num_steps, self.halt_exploration_prob, device, self.training
         )
         halted = torch.zeros(B, dtype=torch.bool, device=device)
-        steps_taken = self.max_act_steps
+        steps_taken = num_steps
         
-        for step in range(self.max_act_steps):
-            step_emb = self.step_embedding_table(torch.tensor(step, device=device))
+        for step in range(num_steps):
+            if self.use_step_embeddings and hasattr(self, 'step_embedding_table'):
+                # Clamp step index for extrapolation (reuse last embedding for extra steps)
+                step_idx = min(step, self._trained_max_steps - 1)
+                step_emb = self.step_embedding_table(torch.tensor(step_idx, device=device))
+            else:
+                # No step embeddings - enables clean compute extrapolation
+                step_emb = None
+            
             stream = self.recurrence(stream, step_emb, detach_input=True)
             
             # Check halting (unless force_full_compute is set)
             if not self._force_full_compute:
-                halted = self.halt.step(stream.solution, step, halted, min_steps, is_last=(step == self.max_act_steps - 1))
+                halted = self.halt.step(stream.solution, step, halted, min_steps, is_last=(step == num_steps - 1))
                 if halted.all():
                     steps_taken = step + 1
                     break

@@ -11,6 +11,11 @@ The key insight: separating "thinking" (z) from "answering" (y)
 with distinct update rules:
   - z' = block(x + y + z + step)   # reasoning uses input
   - y' = block(y + z' + step)      # answer does NOT use input
+
+Supports:
+  - use_step_embeddings: Set to False to disable step embeddings (enables clean extrapolation)
+  - set_inference_steps(): Run more/fewer steps at inference than training
+  - set_full_compute(): Force all steps without early halting
 """
 import torch
 import torch.nn as nn
@@ -33,15 +38,16 @@ class UTLevel1(BaseLitGPT):
         lr: float,
         ponder_cost_weight: float = 0.01,
         max_act_steps: int = None,
+        use_step_embeddings: bool = True,
     ):
         super().__init__(vocab_size, block_size, n_embd, lr)
         self.save_hyperparameters()
 
         self.max_act_steps = max_act_steps if max_act_steps is not None else n_layer
+        self._trained_max_steps = self.max_act_steps  # Remember for clamping during extrapolation
 
         # === Same as UT ===
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
-        self.step_embedding_table = nn.Embedding(self.max_act_steps, n_embd)
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
         self.shared_block = Block(n_embd, n_head, block_size, dropout)
         self.ln_f = nn.LayerNorm(n_embd)
@@ -49,7 +55,12 @@ class UTLevel1(BaseLitGPT):
         self.n_layer = n_layer
         self.act = ACTController(n_embd)
 
-        # === NEW: Separate y_init and z_init (TRM paper requirement) ===
+        # Step embeddings (optional - disable for clean compute extrapolation)
+        self.use_step_embeddings = use_step_embeddings
+        if use_step_embeddings:
+            self.step_embedding_table = nn.Embedding(self.max_act_steps, n_embd)
+
+        # === Separate y_init and z_init (TRM paper requirement) ===
         self.solution_param = nn.Parameter(torch.randn(n_embd) * 0.02)   # y_init
         self.reasoning_param = nn.Parameter(torch.randn(n_embd) * 0.02)  # z_init
         
@@ -67,13 +78,22 @@ class UTLevel1(BaseLitGPT):
         pos_emb = self.position_embedding_table(torch.arange(T, device=device))
         x_input = tok_emb + pos_emb
 
-        # === NEW: Initialize with SEPARATE y and z ===
+        # Initialize with SEPARATE y and z
         stream = DualStreamState.init(x_input, self.solution_param, self.reasoning_param)
         
         act_state = ACTState.init(B, T, self.hparams.n_embd, device)
 
-        for step in range(self.max_act_steps):
-            step_emb = self.step_embedding_table(torch.tensor(step, device=device))
+        # Get number of steps (allows inference-time extrapolation)
+        num_steps = self.get_inference_steps(self.max_act_steps)
+
+        for step in range(num_steps):
+            if self.use_step_embeddings and hasattr(self, 'step_embedding_table'):
+                # Clamp step index for extrapolation (reuse last embedding for extra steps)
+                step_idx = min(step, self._trained_max_steps - 1)
+                step_emb = self.step_embedding_table(torch.tensor(step_idx, device=device))
+            else:
+                # No step embeddings - pass None to dual_step
+                step_emb = None
             
             # Dual-stream update: z' = f(x,y,z), then y' = f(y,z')
             stream = self.dual_step(stream, step_emb)

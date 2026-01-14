@@ -97,7 +97,7 @@ def adjust_params_for_compute_budget(
     - GPT variants: Adjust n_layer directly
     - UT: Adjust n_layer directly  
     - UTLevel1: Adjust n_layer (each step = 2 passes)
-    - UTLevel2/TRM: Adjust n_layer while keeping loop structure, or adjust loops
+    - UTLevel2/TRM: Smart adjustment of n_layer AND loop counts to match target exactly
     
     Args:
         model_name: Model type
@@ -133,12 +133,73 @@ def adjust_params_for_compute_budget(
         result['n_layer'] = max(1, target_block_passes // 2)
         
     elif model_name in ("ut_level2", "trm"):
-        # More complex: passes = n_layer * n_outer * (n_inner + 1)
-        # Strategy: Keep loop structure fixed, adjust n_layer
-        passes_per_step = n_outer * (n_inner + 1)
-        result['n_layer'] = max(1, target_block_passes // passes_per_step)
-        result['n_inner_loops'] = n_inner
-        result['n_outer_loops'] = n_outer
+        # Complex: passes = n_layer * n_outer * (n_inner + 1)
+        #
+        # Priority order (preserve as much as possible):
+        #   1. n_layer (most important - determines ACT steps)
+        #   2. L (n_inner_loops) - reasoning refinements  
+        #   3. H (n_outer_loops) - solution update cycles
+        #
+        # Strategy:
+        #   1. First try to match target by adjusting n_layer only (keep H, L as specified)
+        #   2. If minimum compute (n_layer=1) is still too high, reduce H first
+        #   3. If still too high, reduce L
+        #   4. If still too high, reduce both
+        
+        # Start with the specified/default values
+        best_n_layer = None
+        best_n_outer = n_outer
+        best_n_inner = n_inner
+        
+        # Try configurations in priority order
+        # Priority: n_layer > L > H
+        # So we reduce H first (to preserve L), then reduce L if needed
+        configs_to_try = [
+            (n_outer, n_inner),           # Original config (e.g., H=2, L=2)
+        ]
+        
+        # Add fallback configs: reduce H first (keeping L), then reduce L
+        # Outer loop: L values from original down to 0
+        # Inner loop: H values from original down to 1
+        for try_inner in range(n_inner, -1, -1):      # L: 2, 1, 0
+            for try_outer in range(n_outer, 0, -1):   # H: 2, 1
+                cfg = (try_outer, try_inner)
+                if cfg not in configs_to_try:
+                    configs_to_try.append(cfg)
+        
+        for try_outer, try_inner in configs_to_try:
+            passes_per_step = try_outer * (try_inner + 1)
+            
+            # Can we achieve the target with some n_layer?
+            if target_block_passes % passes_per_step == 0:
+                # Exact match possible
+                candidate_n_layer = target_block_passes // passes_per_step
+                if candidate_n_layer >= 1:
+                    best_n_layer = candidate_n_layer
+                    best_n_outer = try_outer
+                    best_n_inner = try_inner
+                    break
+            else:
+                # No exact match, but can we get close with n_layer >= 1?
+                candidate_n_layer = max(1, target_block_passes // passes_per_step)
+                actual_passes = candidate_n_layer * passes_per_step
+                
+                # Accept if this is the first valid config or if we haven't found anything yet
+                if best_n_layer is None:
+                    best_n_layer = candidate_n_layer
+                    best_n_outer = try_outer
+                    best_n_inner = try_inner
+                    # Don't break - keep looking for exact match
+        
+        # If still no solution, use minimal config
+        if best_n_layer is None:
+            best_n_layer = target_block_passes  # n_layer = target with H=1, L=0
+            best_n_outer = 1
+            best_n_inner = 0
+        
+        result['n_layer'] = best_n_layer
+        result['n_outer_loops'] = best_n_outer
+        result['n_inner_loops'] = best_n_inner
     
     else:
         raise ValueError(f"Unknown model: {model_name}")
