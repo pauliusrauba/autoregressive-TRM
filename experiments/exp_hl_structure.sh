@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# exp v4: goal is to understaand H-L behavior
 # experiments/exp_hl_structure.sh
 # H-L Loop Structure Experiment for TRM and UT-Level2
 #
@@ -30,6 +31,7 @@ TRAIN_LENGTHS=(2 5 10 20)
 HL_CONFIGS=(
     "1:1"
     "2:2"
+    "2:1"
     "4:2"
     "6:2"
     "8:2"
