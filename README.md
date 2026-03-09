@@ -117,6 +117,8 @@ experiments/*.sh  export_wandb_logs.py   notebooks/*.ipynb
 
 ### 1. Run the experiments
 
+In the camera ready version, we rely on the results of the script in `exp_length_generalization.sh`. However, we included a few more shell scripts to start running more analyses for those interested.
+
 Each script launches a full model × task grid and manages GPU scheduling:
 
 | Script | Paper Section | What it tests |
