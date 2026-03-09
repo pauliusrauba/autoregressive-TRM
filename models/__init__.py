@@ -13,8 +13,6 @@ from .common.compute import (
     normalize_model_kwargs_for_compute,
 )
 
-#from .ut_gpt import LitUnifiedGPTUT
-
 model_registry = {
     "gpt": GPTBase,
     "gpt_level1": GPTLevel1,

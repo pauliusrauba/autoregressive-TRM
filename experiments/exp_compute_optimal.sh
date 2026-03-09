@@ -38,17 +38,17 @@ TASK="addition_char"
 
 # Training length (fixed)
 ALGO_TRAIN_LEN=10
-ALGO_EVAL_LENGTHS="10 15 20 30"  # 1x, 1.5x, 2x, 3x
+ALGO_EVAL_LENGTHS="10 11 15 20"  # 1x, 1.5x, 2x, 3x
 
 # Model width scaling (n_embd)
 # Note: n_head must divide n_embd
-N_EMBD_SIZES=(96 128 192)
+N_EMBD_SIZES=(128 256 384 512)
 
 # Training duration scaling (steps)
-TRAINING_STEPS=(1000 2000 4000)
+TRAINING_STEPS=(15000)
 
 # Fixed testing FLOPs: 12 block passes for all models
-TARGET_BLOCK_PASSES=12
+TARGET_BLOCK_PASSES=24
 
 # Fixed H-L structure for UT-Level2/TRM
 HL_OUTER=1
@@ -58,7 +58,7 @@ HL_INNER=2
 BLOCK_SIZE=120        # Max sequence for addition L=30 = ~93 tokens + buffer
 DROPOUT=0.1
 BATCH_SIZE=64
-EVAL_INTERVAL=200
+EVAL_INTERVAL=500
 EVAL_ITERS=50
 ALGO_EVAL_N=100
 SEED=1337
@@ -78,7 +78,7 @@ MODELS=(
 )
 
 # Tag for W&B grouping
-BASE_TAG="compute_optimal"
+BASE_TAG="compute_optimal-v2"
 
 # =============================================================================
 # Model-Specific Configuration

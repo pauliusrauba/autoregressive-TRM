@@ -1,4 +1,4 @@
-# datasets/algorithmic_char.py
+# data_modules/algorithmic_char.py
 import os
 from dataclasses import dataclass
 from typing import Tuple

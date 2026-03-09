@@ -16,12 +16,6 @@ dependencies = [
     "seaborn>=0.13.2",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "ipykernel",
-    "jupyter",
-]
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

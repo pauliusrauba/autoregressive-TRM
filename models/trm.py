@@ -77,7 +77,6 @@ class TRM(UTLevel2):
         loss = None
         if targets is not None:
             loss = F.cross_entropy(logits.view(B * T, -1), targets.view(-1))
-
         return logits, loss
 
     def training_step(self, batch, batch_idx):

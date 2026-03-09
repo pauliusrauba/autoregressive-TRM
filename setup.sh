@@ -75,5 +75,3 @@ echo ""
 echo "To run training:"
 echo -e "${YELLOW}uv run python train.py --model gpt --dataset addition_char${NC}"
 
-
-
